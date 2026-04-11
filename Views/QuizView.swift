@@ -65,7 +65,17 @@ struct QuizView: View {
             }
         }
         .padding()
-        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Image(systemName: source == .wrongOnly ? "arrow.counterclockwise" : "checkmark.circle.fill")
+                        .foregroundStyle(source == .wrongOnly ? Color.orange : Color.accentColor)
+                    Text(title)
+                }
+                .font(.headline)
+            }
+        }
     }
 
     // MARK: - Start
@@ -188,7 +198,7 @@ struct QuizView: View {
 
             VStack(spacing: 8) {
                 Text(questionText(for: word))
-                    .font(.system(size: 36, weight: .bold))
+                    .font(.system(size: mode == .koToEn ? 24 : 36, weight: .bold))
                     .multilineTextAlignment(.center)
                 if mode == .enToKo, !word.pronunciation.isEmpty {
                     Text(word.pronunciation)

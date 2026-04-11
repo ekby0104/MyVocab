@@ -59,7 +59,17 @@ struct FlashcardView: View {
                 }
             }
             .padding()
-            .navigationTitle("플래시카드")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "rectangle.on.rectangle.angled")
+                            .foregroundStyle(Color.accentColor)
+                        Text("플래시카드")
+                    }
+                    .font(.headline)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

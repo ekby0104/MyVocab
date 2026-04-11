@@ -11,6 +11,8 @@ struct SettingsView: View {
 
     @State private var showingImporter = false
     @State private var showingDeleteAlert = false
+    @State private var showingClearWrongAlert = false
+    @State private var showingClearFavAlert = false
     @State private var showingNaverSync = false
     @State private var lastResult: NaverImporter.ImportResult? = nil
     @State private var errorMessage: String? = nil
@@ -130,6 +132,18 @@ struct SettingsView: View {
                     }
 
                     Button(role: .destructive) {
+                        showingClearWrongAlert = true
+                    } label: {
+                        Label("오답 횟수 초기화", systemImage: "arrow.counterclockwise")
+                    }
+
+                    Button(role: .destructive) {
+                        showingClearFavAlert = true
+                    } label: {
+                        Label("즐겨찾기 초기화", systemImage: "star.slash")
+                    }
+
+                    Button(role: .destructive) {
                         showingDeleteAlert = true
                     } label: {
                         Label("전체 단어 삭제", systemImage: "trash")
@@ -161,7 +175,17 @@ struct SettingsView: View {
                     LabeledContent("버전", value: "1.0")
                 }
             }
-            .navigationTitle("설정")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundStyle(Color.accentColor)
+                        Text("설정")
+                    }
+                    .font(.headline)
+                }
+            }
             .fileImporter(
                 isPresented: $showingImporter,
                 allowedContentTypes: [.json],
@@ -181,6 +205,18 @@ struct SettingsView: View {
                 Button("삭제", role: .destructive) { deleteAll() }
             } message: {
                 Text("모든 단어가 삭제됩니다. 되돌릴 수 없습니다.")
+            }
+            .alert("오답 횟수 초기화", isPresented: $showingClearWrongAlert) {
+                Button("취소", role: .cancel) {}
+                Button("초기화", role: .destructive) { clearWrongCounts() }
+            } message: {
+                Text("모든 단어의 오답 횟수와 오답 상태가 초기화됩니다.")
+            }
+            .alert("즐겨찾기 초기화", isPresented: $showingClearFavAlert) {
+                Button("취소", role: .cancel) {}
+                Button("초기화", role: .destructive) { clearFavorites() }
+            } message: {
+                Text("모든 단어의 즐겨찾기가 해제됩니다.")
             }
             .alert("오류", isPresented: .constant(errorMessage != nil)) {
                 Button("확인") { errorMessage = nil }
@@ -269,6 +305,21 @@ struct SettingsView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func clearWrongCounts() {
+        for w in allWords {
+            w.wrongCount = 0
+            w.isWrong = false
+        }
+        try? context.save()
+    }
+
+    private func clearFavorites() {
+        for w in allWords {
+            w.isFavorite = false
+        }
+        try? context.save()
     }
 
     private func deleteAll() {

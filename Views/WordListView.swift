@@ -10,6 +10,8 @@ struct WordListView: View {
     enum SortOrder: String, CaseIterable, Identifiable {
         case newest = "최신순"
         case alphabet = "알파벳"
+        case favorite = "즐겨찾기"
+        case wrongCount = "오답횟수"
         case random = "랜덤"
         var id: String { rawValue }
     }
@@ -19,9 +21,11 @@ struct WordListView: View {
     var displayed: [Word] {
         var list = favoritesOnly ? words.filter(\.isFavorite) : words
         switch sortOrder {
-        case .newest:   list.sort { $0.createdAt > $1.createdAt }
-        case .alphabet: list.sort { $0.english.lowercased() < $1.english.lowercased() }
-        case .random:   list.shuffle()
+        case .newest:    list.sort { $0.createdAt > $1.createdAt }
+        case .alphabet:  list.sort { $0.english.lowercased() < $1.english.lowercased() }
+        case .favorite:  list.sort { ($0.isFavorite ? 0 : 1) < ($1.isFavorite ? 0 : 1) }
+        case .wrongCount: list.sort { $0.wrongCount > $1.wrongCount }
+        case .random:    list.shuffle()
         }
         return list
     }
@@ -51,7 +55,7 @@ struct WordListView: View {
                             NavigationLink { WordDetailView(word: word) } label: {
                                 WordRow(word: word)
                             }
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button {
                                     toggleFavorite(word)
                                 } label: {
@@ -62,7 +66,7 @@ struct WordListView: View {
                                 }
                                 .tint(.yellow)
                             }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     delete(word)
                                 } label: {
@@ -73,7 +77,18 @@ struct WordListView: View {
                     }
                 }
             }
-            .navigationTitle(navTitle)
+            .contentMargins(.top, 5, for: .scrollContent)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: favoritesOnly ? "star.fill" : "list.bullet")
+                            .foregroundStyle(favoritesOnly ? Color.yellow : Color.accentColor)
+                        Text(navTitle)
+                    }
+                    .font(.headline)
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -114,8 +129,13 @@ struct WordRow: View {
                 if word.isFavorite {
                     Image(systemName: "star.fill").foregroundStyle(.yellow)
                 }
-                if word.isWrong {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.orange)
+                if word.wrongCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.orange)
+                        Text("\(word.wrongCount)")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
             if !word.pronunciation.isEmpty {

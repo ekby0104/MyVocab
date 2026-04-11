@@ -9,15 +9,46 @@ struct SearchView: View {
     @State private var showBulkAlert = false
     @State private var bulkMessage = ""
 
+    enum SearchScope: String, CaseIterable, Identifiable {
+        case all = "전체"
+        case word = "단어"
+        case example = "예문"
+        var id: String { rawValue }
+    }
+
+    @State private var searchScope: SearchScope = .all
+
     var results: [Word] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return [] }
+        let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return [] }
+        let q = raw.lowercased()
+
+        // 와일드카드 매칭 함수
+        let match: (String) -> Bool = { text in
+            let t = text.lowercased()
+            if q.hasPrefix("*") && q.hasSuffix("*") && q.count > 2 {
+                return t.contains(String(q.dropFirst().dropLast()))
+            } else if q.hasPrefix("*") {
+                return t.hasSuffix(String(q.dropFirst()))
+            } else if q.hasSuffix("*") {
+                return t.hasPrefix(String(q.dropLast()))
+            } else {
+                return t.contains(q)
+            }
+        }
+
         return allWords.filter { w in
-            w.english.lowercased().contains(q) ||
-            w.meaning.lowercased().contains(q) ||
-            w.pronunciation.lowercased().contains(q) ||
-            w.example.lowercased().contains(q) ||
-            w.exampleKo.lowercased().contains(q)
+            switch searchScope {
+            case .all:
+                return match(w.english) || match(w.meaning) ||
+                       match(w.pronunciation) ||
+                       match(w.example) || match(w.exampleKo)
+            case .word:
+                return match(w.english) || match(w.meaning) ||
+                       match(w.pronunciation)
+            case .example:
+                return match(w.example) || match(w.exampleKo)
+            }
         }
     }
 
@@ -85,8 +116,23 @@ struct SearchView: View {
                     }
                 }
             }
-            .navigationTitle("검색")
-            .searchable(text: $query, prompt: "단어 또는 뜻 검색")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(Color.accentColor)
+                        Text("검색")
+                    }
+                    .font(.headline)
+                }
+            }
+            .searchable(text: $query, prompt: "단어 또는 뜻 검색 (*로 와일드카드)")
+            .searchScopes($searchScope) {
+                ForEach(SearchScope.allCases) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
             .alert("완료", isPresented: $showBulkAlert) {
                 Button("확인") {}
             } message: {

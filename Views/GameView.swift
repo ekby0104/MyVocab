@@ -60,7 +60,17 @@ struct GameView: View {
                     .disabled(wrongWords.isEmpty)
                 }
             }
-            .navigationTitle("게임")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gamecontroller.fill")
+                            .foregroundStyle(Color.accentColor)
+                        Text("게임")
+                    }
+                    .font(.headline)
+                }
+            }
             .alert("전체 클리어", isPresented: $showClearAlert) {
                 Button("취소", role: .cancel) {}
                 Button("클리어", role: .destructive) { clearAllWrong() }
