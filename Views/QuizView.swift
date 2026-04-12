@@ -4,6 +4,7 @@ import SwiftData
 struct QuizView: View {
     enum Source {
         case all
+        case favorites
         case wrongOnly
     }
 
@@ -41,12 +42,17 @@ struct QuizView: View {
     private var sourcePool: [Word] {
         switch source {
         case .all:        return allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        case .favorites:  return allWords.filter { $0.isFavorite && !$0.english.isEmpty && !$0.meaning.isEmpty }
         case .wrongOnly:  return allWords.filter { $0.isWrong && !$0.english.isEmpty && !$0.meaning.isEmpty }
         }
     }
 
     private var title: String {
-        source == .wrongOnly ? "틀린 단어 복습" : "퀴즈"
+        switch source {
+        case .all:       return "퀴즈"
+        case .favorites: return "즐겨찾기 퀴즈"
+        case .wrongOnly: return "틀린 단어 복습"
+        }
     }
 
     // 실제 출제될 문제 수 계산
@@ -69,8 +75,8 @@ struct QuizView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
-                    Image(systemName: source == .wrongOnly ? "arrow.counterclockwise" : "checkmark.circle.fill")
-                        .foregroundStyle(source == .wrongOnly ? Color.orange : Color.accentColor)
+                    Image(systemName: source == .wrongOnly ? "arrow.counterclockwise" : source == .favorites ? "star.circle.fill" : "checkmark.circle.fill")
+                        .foregroundStyle(source == .wrongOnly ? Color.orange : source == .favorites ? Color.yellow : Color.accentColor)
                     Text(title)
                 }
                 .font(.headline)
@@ -83,11 +89,11 @@ struct QuizView: View {
     private var startScreen: some View {
         ScrollView {
             VStack(spacing: 20) {
-                Image(systemName: source == .wrongOnly ? "arrow.counterclockwise.circle" : "checkmark.circle")
+                Image(systemName: source == .wrongOnly ? "arrow.counterclockwise.circle" : source == .favorites ? "star.circle" : "checkmark.circle")
                     .font(.system(size: 64))
-                    .foregroundStyle(source == .wrongOnly ? Color.orange : Color.accentColor)
+                    .foregroundStyle(source == .wrongOnly ? Color.orange : source == .favorites ? Color.yellow : Color.accentColor)
 
-                Text(source == .wrongOnly ? "틀린 단어 복습" : "퀴즈 시작")
+                Text(title)
                     .font(.title.bold())
 
                 Picker("모드", selection: $mode) {
@@ -95,17 +101,22 @@ struct QuizView: View {
                 }
                 .pickerStyle(.segmented)
 
-                if source == .all {
+                if source != .wrongOnly {
                     countSelector
                 }
 
-                if source == .wrongOnly {
+                switch source {
+                case .wrongOnly:
                     Text("틀린 단어 \(sourcePool.count)개를 복습합니다.\n맞추면 자동으로 클리어됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
-                } else {
-                    Text("저장된 단어 \(sourcePool.count)개 중 \(effectiveCount)개가 출제됩니다.")
+                case .favorites:
+                    Text("즐겨찾기 \(sourcePool.count)개 중 \(effectiveCount)개가 출제됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .all:
+                    Text("전체 단어 \(sourcePool.count)개 중 \(effectiveCount)개가 출제됩니다.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

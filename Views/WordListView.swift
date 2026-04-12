@@ -17,6 +17,7 @@ struct WordListView: View {
     }
 
     @State private var sortOrder: SortOrder = .newest
+    @State private var hideMeaning: Bool = false
 
     var displayed: [Word] {
         var list = favoritesOnly ? words.filter(\.isFavorite) : words
@@ -53,7 +54,7 @@ struct WordListView: View {
                     List {
                         ForEach(displayed) { word in
                             NavigationLink { WordDetailView(word: word) } label: {
-                                WordRow(word: word)
+                                WordRow(word: word, hideMeaning: hideMeaning)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button {
@@ -95,6 +96,14 @@ struct WordListView: View {
                         Picker("정렬", selection: $sortOrder) {
                             ForEach(SortOrder.allCases) { Text($0.rawValue).tag($0) }
                         }
+                        if favoritesOnly {
+                            Divider()
+                            Button {
+                                hideMeaning.toggle()
+                            } label: {
+                                Label(hideMeaning ? "뜻 보기" : "뜻 숨기기", systemImage: hideMeaning ? "eye" : "eye.slash")
+                            }
+                        }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                     }
@@ -116,6 +125,7 @@ struct WordListView: View {
 
 struct WordRow: View {
     let word: Word
+    var hideMeaning: Bool = false
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -143,7 +153,7 @@ struct WordRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if !word.meaning.isEmpty {
+            if !hideMeaning, !word.meaning.isEmpty {
                 Text(word.meaning)
                     .font(.subheadline)
                     .lineLimit(2)

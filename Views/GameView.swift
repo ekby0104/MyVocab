@@ -10,6 +10,10 @@ struct GameView: View {
         allWords.filter(\.isWrong)
     }
 
+    private var favoriteWords: [Word] {
+        allWords.filter(\.isFavorite)
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -31,10 +35,24 @@ struct GameView: View {
                         gameRow(
                             icon: "checkmark.circle.fill",
                             title: "퀴즈",
-                            subtitle: "4지선다 문제 풀기",
+                            subtitle: "전체 단어에서 4지선다",
                             color: .green
                         )
                     }
+
+                    NavigationLink {
+                        QuizView(source: .favorites)
+                    } label: {
+                        gameRow(
+                            icon: "star.circle.fill",
+                            title: "즐겨찾기 퀴즈",
+                            subtitle: favoriteWords.isEmpty
+                                ? "즐겨찾기 단어가 없습니다"
+                                : "즐겨찾기 \(favoriteWords.count)개에서 출제",
+                            color: .yellow
+                        )
+                    }
+                    .disabled(favoriteWords.count < 4)
                 }
 
                 Section("복습") {

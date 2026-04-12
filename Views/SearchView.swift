@@ -9,50 +9,64 @@ struct SearchView: View {
     @State private var showBulkAlert = false
     @State private var bulkMessage = ""
 
-    enum SearchScope: String, CaseIterable, Identifiable {
-        case all = "전체"
-        case word = "단어"
-        case example = "예문"
-        var id: String { rawValue }
+    /// 와일드카드 검색 여부 (*, ? 포함)
+    private var hasWildcard: Bool {
+        query.contains("*") || query.contains("?")
     }
 
-    @State private var searchScope: SearchScope = .all
+    /// 와일드카드 → 정규식 변환
+    /// * = 하나 이상의 임의 문자, ? = 정확히 한 글자
+    /// 나머지 정규식 특수문자는 이스케이프
+    private func wildcardRegex(from pattern: String) -> NSRegularExpression? {
+        var regex = ""
+        for ch in pattern {
+            switch ch {
+            case "*":
+                regex += ".+"        // 1개 이상
+            case "?":
+                regex += "."         // 정확히 1개
+            case ".", "(", ")", "[", "]", "{", "}", "^", "$",
+                 "|", "\\", "+":
+                regex += "\\\(ch)"   // 정규식 특수문자 이스케이프
+            default:
+                regex += String(ch)
+            }
+        }
+        // 전체 매칭이 아닌 부분 매칭 (wildcard 위치가 의미 있음)
+        return try? NSRegularExpression(
+            pattern: "^" + regex + "$",
+            options: [.caseInsensitive]
+        )
+    }
 
     var results: [Word] {
-        let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return [] }
-        let q = raw.lowercased()
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
 
-        // 와일드카드 매칭 함수
-        let match: (String) -> Bool = { text in
-            let t = text.lowercased()
-            if q.hasPrefix("*") && q.hasSuffix("*") && q.count > 2 {
-                return t.contains(String(q.dropFirst().dropLast()))
-            } else if q.hasPrefix("*") {
-                return t.hasSuffix(String(q.dropFirst()))
-            } else if q.hasSuffix("*") {
-                return t.hasPrefix(String(q.dropLast()))
-            } else {
-                return t.contains(q)
+        if hasWildcard {
+            // 와일드카드 모드: 영어/한글 뜻만 대상으로 패턴 매칭
+            guard let regex = wildcardRegex(from: q) else { return [] }
+            return allWords.filter { w in
+                matches(regex, w.english) || matches(regex, w.meaning)
             }
-        }
-
-        return allWords.filter { w in
-            switch searchScope {
-            case .all:
-                return match(w.english) || match(w.meaning) ||
-                       match(w.pronunciation) ||
-                       match(w.example) || match(w.exampleKo)
-            case .word:
-                return match(w.english) || match(w.meaning) ||
-                       match(w.pronunciation)
-            case .example:
-                return match(w.example) || match(w.exampleKo)
+        } else {
+            // 일반 모드: 부분 일치 검색
+            let lower = q.lowercased()
+            return allWords.filter { w in
+                w.english.lowercased().contains(lower) ||
+                w.meaning.lowercased().contains(lower) ||
+                w.pronunciation.lowercased().contains(lower) ||
+                w.example.lowercased().contains(lower) ||
+                w.exampleKo.lowercased().contains(lower)
             }
         }
     }
 
-    // 현재 검색 결과가 모두 즐겨찾기 상태인지
+    private func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.firstMatch(in: text, options: [], range: range) != nil
+    }
+
     private var allFavorited: Bool {
         !results.isEmpty && results.allSatisfy(\.isFavorite)
     }
@@ -61,16 +75,26 @@ struct SearchView: View {
         NavigationStack {
             Group {
                 if query.isEmpty {
-                    ContentUnavailableView(
-                        "검색",
-                        systemImage: "magnifyingglass",
-                        description: Text("한글 또는 영어로 검색할 수 있습니다.")
-                    )
+                    ContentUnavailableView {
+                        Label("검색", systemImage: "magnifyingglass")
+                    } description: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("한글 또는 영어로 검색할 수 있습니다.")
+                            Text("와일드카드:")
+                                .font(.caption.bold())
+                                .padding(.top, 4)
+                            Text("• **ab\\*** — ab로 시작하는 단어")
+                            Text("• **\\*ing** — ing로 끝나는 단어")
+                            Text("• **c\\*t** — c와 t 사이에 글자 포함")
+                            Text("• **c?t** — cat, cot처럼 3글자")
+                        }
+                        .font(.caption)
+                        .multilineTextAlignment(.leading)
+                    }
                 } else if results.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else {
                     List {
-                        // 일괄 작업 헤더
                         Section {
                             Button {
                                 bulkToggleFavorite()
@@ -112,27 +136,16 @@ struct SearchView: View {
                                     }
                                 }
                             }
+                        } header: {
+                            if hasWildcard {
+                                Text("패턴 검색: \(query)")
+                            }
                         }
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(Color.accentColor)
-                        Text("검색")
-                    }
-                    .font(.headline)
-                }
-            }
-            .searchable(text: $query, prompt: "단어 또는 뜻 검색 (*로 와일드카드)")
-            .searchScopes($searchScope) {
-                ForEach(SearchScope.allCases) { scope in
-                    Text(scope.rawValue).tag(scope)
-                }
-            }
+            .navigationTitle("검색")
+            .searchable(text: $query, prompt: "단어 검색 (*, ? 사용 가능)")
             .alert("완료", isPresented: $showBulkAlert) {
                 Button("확인") {}
             } message: {
@@ -140,8 +153,6 @@ struct SearchView: View {
             }
         }
     }
-
-    // MARK: - Actions
 
     private func toggleFavorite(_ word: Word) {
         word.isFavorite.toggle()
