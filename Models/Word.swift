@@ -16,7 +16,11 @@ final class Word {
     var correctCount: Int
     var wrongCount: Int
     var isFavorite: Bool
-    var isWrong: Bool   // 현재 "틀린 단어" 목록에 있는지
+    var isWrong: Bool
+
+    // SRS (Spaced Repetition System)
+    var srsLevel: Int            // 0~7, 높을수록 복습 간격 길어짐
+    var nextReviewDate: Date?    // nil이면 아직 한 번도 학습 안 함
 
     init(
         id: String = UUID().uuidString,
@@ -32,7 +36,9 @@ final class Word {
         correctCount: Int = 0,
         wrongCount: Int = 0,
         isFavorite: Bool = false,
-        isWrong: Bool = false
+        isWrong: Bool = false,
+        srsLevel: Int = 0,
+        nextReviewDate: Date? = nil
     ) {
         self.id = id
         self.english = english
@@ -48,5 +54,7 @@ final class Word {
         self.wrongCount = wrongCount
         self.isFavorite = isFavorite
         self.isWrong = isWrong
+        self.srsLevel = srsLevel
+        self.nextReviewDate = nextReviewDate
     }
 }

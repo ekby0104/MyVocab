@@ -6,6 +6,7 @@ struct QuizView: View {
         case all
         case favorites
         case wrongOnly
+        case dueToday    // 오늘 복습할 단어 (SRS)
     }
 
     let source: Source
@@ -40,18 +41,27 @@ struct QuizView: View {
     }
 
     private var sourcePool: [Word] {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
         switch source {
-        case .all:        return allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
-        case .favorites:  return allWords.filter { $0.isFavorite && !$0.english.isEmpty && !$0.meaning.isEmpty }
-        case .wrongOnly:  return allWords.filter { $0.isWrong && !$0.english.isEmpty && !$0.meaning.isEmpty }
+        case .all:        return base
+        case .favorites:  return base.filter(\.isFavorite)
+        case .wrongOnly:  return base.filter(\.isWrong)
+        case .dueToday:
+            // SRS: 복습 예정일이 지났거나, 한 번도 학습 안 한 새 단어
+            let now = Date()
+            return base.filter { w in
+                if let next = w.nextReviewDate { return next <= now }
+                return true   // 새 단어도 복습 대상
+            }
         }
     }
 
     private var title: String {
         switch source {
-        case .all:       return "퀴즈"
-        case .favorites: return "즐겨찾기 퀴즈"
         case .wrongOnly: return "틀린 단어 복습"
+        case .dueToday:  return "오늘의 복습"
+        case .favorites: return "즐겨찾기 퀴즈"
+        case .all:       return "퀴즈"
         }
     }
 
@@ -108,6 +118,11 @@ struct QuizView: View {
                 switch source {
                 case .wrongOnly:
                     Text("틀린 단어 \(sourcePool.count)개를 복습합니다.\n맞추면 자동으로 클리어됩니다.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                case .dueToday:
+                    Text("오늘 복습할 단어 \(sourcePool.count)개를 학습합니다.\n맞추면 다음 복습 일정이 연장돼요.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -211,6 +226,17 @@ struct QuizView: View {
                 Text(questionText(for: word))
                     .font(.system(size: mode == .koToEn ? 24 : 36, weight: .bold))
                     .multilineTextAlignment(.center)
+                
+                if mode == .enToKo {
+                    Button {
+                        SpeechService.shared.speak(word.english)
+                    } label: {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.title3)
+                            .foregroundStyle(.blue)
+                    }
+                }
+                
                 if mode == .enToKo, !word.pronunciation.isEmpty {
                     Text(word.pronunciation)
                         .font(.body)
@@ -309,14 +335,11 @@ struct QuizView: View {
         selectedId = selected.id
         if selected.id == correct.id {
             correctCount += 1
-            correct.correctCount += 1
-            correct.isWrong = false
+            SRSService.correct(correct)   // 정답 → 레벨 +1, 다음 복습일 갱신
         } else {
             wrongCount += 1
-            correct.wrongCount += 1
-            correct.isWrong = true
+            SRSService.wrong(correct)     // 오답 → 레벨 0, 즉시 복습
         }
-        correct.lastReviewedAt = .now
         try? context.save()
     }
 

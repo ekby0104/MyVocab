@@ -11,8 +11,6 @@ struct SettingsView: View {
 
     @State private var showingImporter = false
     @State private var showingDeleteAlert = false
-    @State private var showingClearWrongAlert = false
-    @State private var showingClearFavAlert = false
     @State private var showingNaverSync = false
     @State private var lastResult: NaverImporter.ImportResult? = nil
     @State private var errorMessage: String? = nil
@@ -23,6 +21,13 @@ struct SettingsView: View {
     @State private var showQuickSyncAlert = false
     @State private var hasValidCookies = CookieStorage.hasValidCookies
     @State private var lastSyncDate: Date? = CookieStorage.lastSyncDate
+
+    // 백업/복원
+    @State private var showBackupShare = false
+    @State private var backupURL: URL? = nil
+    @State private var showRestoreImporter = false
+    @State private var backupAlertMessage: String? = nil
+    @State private var showBackupAlert = false
 
     private var selectedWordbook: Wordbook {
         wordbookList.first { $0.id == selectedWordbookId } ?? .all
@@ -38,160 +43,27 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("네이버 동기화") {
-                    // 단어장 선택
-                    Picker(selection: wordbookBinding) {
-                        ForEach(wordbookList) { wb in
-                            Text(wb.name).tag(wb)
-                        }
-                    } label: {
-                        Label("단어장", systemImage: "books.vertical")
-                    }
-
-                    // 단어장 목록 새로고침
-                    Button {
-                        Task { await refreshWordbookList() }
-                    } label: {
-                        HStack {
-                            if isRefreshingList {
-                                ProgressView().controlSize(.small).padding(.trailing, 4)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                    .foregroundStyle(.blue)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("단어장 목록 새로고침")
-                                    .foregroundStyle(hasValidCookies ? Color.primary : Color.secondary)
-                                Text(wordbookList.count > 1
-                                     ? "\(wordbookList.count - 1)개 단어장 불러옴"
-                                     : "아직 목록을 가져오지 않았어요")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .disabled(!hasValidCookies || isRefreshingList)
-
-                    // 빠른 동기화
-                    Button {
-                        Task { await quickSync() }
-                    } label: {
-                        HStack {
-                            if isQuickSyncing {
-                                ProgressView().controlSize(.small).padding(.trailing, 4)
-                            } else {
-                                Image(systemName: "bolt.fill").foregroundStyle(.yellow)
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(selectedWordbook.name) 빠른 동기화")
-                                    .foregroundStyle(hasValidCookies ? Color.primary : Color.secondary)
-                                if let date = lastSyncDate {
-                                    Text("마지막: \(date.formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                } else if !hasValidCookies {
-                                    Text("먼저 네이버 로그인이 필요합니다")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                    }
-                    .disabled(!hasValidCookies || isQuickSyncing)
-
-                    // 네이버 로그인 (WebView)
-                    Button {
-                        showingNaverSync = true
-                    } label: {
-                        Label(
-                            hasValidCookies ? "네이버 재로그인" : "네이버 로그인",
-                            systemImage: "globe"
-                        )
-                    }
-
-                    if hasValidCookies {
-                        Button(role: .destructive) {
-                            CookieStorage.clear()
-                            WordbookStorage.clear()
-                            hasValidCookies = false
-                            lastSyncDate = nil
-                            wordbookList = WordbookStorage.load()
-                        } label: {
-                            Label("저장된 로그인 삭제", systemImage: "key.slash")
-                        }
-                    }
-                }
-
-                Section("데이터") {
-                    LabeledContent("저장된 단어", value: "\(allWords.count)개")
-
-                    Button {
-                        showingImporter = true
-                    } label: {
-                        Label("JSON 파일 불러오기", systemImage: "square.and.arrow.down")
-                    }
-
-                    Button(role: .destructive) {
-                        showingClearWrongAlert = true
-                    } label: {
-                        Label("오답 횟수 초기화", systemImage: "arrow.counterclockwise")
-                    }
-
-                    Button(role: .destructive) {
-                        showingClearFavAlert = true
-                    } label: {
-                        Label("즐겨찾기 초기화", systemImage: "star.slash")
-                    }
-
-                    Button(role: .destructive) {
-                        showingDeleteAlert = true
-                    } label: {
-                        Label("전체 단어 삭제", systemImage: "trash")
-                    }
-                }
-
-                if let result = lastResult {
-                    Section("최근 불러오기 결과") {
-                        LabeledContent("추가됨", value: "\(result.inserted)개")
-                        LabeledContent("건너뜀", value: "\(result.skipped)개")
-
-                        ForEach(Array(result.skippedCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { reason in
-                            LabeledContent("  └ \(reason.rawValue)", value: "\(result.skippedCounts[reason] ?? 0)개")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        if !result.skippedItems.isEmpty {
-                            Button {
-                                showLogSheet = true
-                            } label: {
-                                Label("건너뛴 단어 보기", systemImage: "list.bullet.rectangle")
-                            }
-                        }
-                    }
-                }
-
-                Section("정보") {
-                    LabeledContent("버전", value: "1.0")
-                }
+                naverSyncSection
+                dataSection
+                backupSection
+                resultSection
+                infoSection
             }
+            .navigationTitle("⚙️ 설정")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundStyle(Color.accentColor)
-                        Text("설정")
-                    }
-                    .font(.headline)
-                }
-            }
             .fileImporter(
                 isPresented: $showingImporter,
                 allowedContentTypes: [.json],
                 allowsMultipleSelection: false
             ) { result in
                 handleImport(result)
+            }
+            .fileImporter(
+                isPresented: $showRestoreImporter,
+                allowedContentTypes: [.json],
+                allowsMultipleSelection: false
+            ) { result in
+                handleRestore(result)
             }
             .sheet(isPresented: $showingNaverSync, onDismiss: {
                 hasValidCookies = CookieStorage.hasValidCookies
@@ -200,23 +72,21 @@ struct SettingsView: View {
             }) {
                 NaverSyncView()
             }
+            .sheet(isPresented: $showBackupShare) {
+                if let url = backupURL {
+                    ShareSheet(items: [url])
+                }
+            }
+            .sheet(isPresented: $showLogSheet) {
+                if let result = lastResult {
+                    SkippedLogView(result: result)
+                }
+            }
             .alert("전체 삭제", isPresented: $showingDeleteAlert) {
                 Button("취소", role: .cancel) {}
                 Button("삭제", role: .destructive) { deleteAll() }
             } message: {
                 Text("모든 단어가 삭제됩니다. 되돌릴 수 없습니다.")
-            }
-            .alert("오답 횟수 초기화", isPresented: $showingClearWrongAlert) {
-                Button("취소", role: .cancel) {}
-                Button("초기화", role: .destructive) { clearWrongCounts() }
-            } message: {
-                Text("모든 단어의 오답 횟수와 오답 상태가 초기화됩니다.")
-            }
-            .alert("즐겨찾기 초기화", isPresented: $showingClearFavAlert) {
-                Button("취소", role: .cancel) {}
-                Button("초기화", role: .destructive) { clearFavorites() }
-            } message: {
-                Text("모든 단어의 즐겨찾기가 해제됩니다.")
             }
             .alert("오류", isPresented: .constant(errorMessage != nil)) {
                 Button("확인") { errorMessage = nil }
@@ -231,11 +101,167 @@ struct SettingsView: View {
             } message: {
                 Text(quickSyncMessage ?? "")
             }
-            .sheet(isPresented: $showLogSheet) {
-                if let result = lastResult {
-                    SkippedLogView(result: result)
+            .alert("백업/복원", isPresented: $showBackupAlert) {
+                Button("확인") {}
+            } message: {
+                Text(backupAlertMessage ?? "")
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    @ViewBuilder
+    private var naverSyncSection: some View {
+        Section("네이버 동기화") {
+            Picker(selection: wordbookBinding) {
+                ForEach(wordbookList) { wb in
+                    Text(wb.name).tag(wb)
+                }
+            } label: {
+                Label("단어장", systemImage: "books.vertical")
+            }
+
+            Button {
+                Task { await refreshWordbookList() }
+            } label: {
+                HStack {
+                    if isRefreshingList {
+                        ProgressView().controlSize(.small).padding(.trailing, 4)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(.blue)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("단어장 목록 새로고침")
+                            .foregroundStyle(hasValidCookies ? Color.primary : Color.secondary)
+                        Text(wordbookList.count > 1
+                             ? "\(wordbookList.count - 1)개 단어장 불러옴"
+                             : "아직 목록을 가져오지 않았어요")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+            .disabled(!hasValidCookies || isRefreshingList)
+
+            Button {
+                Task { await quickSync() }
+            } label: {
+                HStack {
+                    if isQuickSyncing {
+                        ProgressView().controlSize(.small).padding(.trailing, 4)
+                    } else {
+                        Image(systemName: "bolt.fill").foregroundStyle(.yellow)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(selectedWordbook.name) 빠른 동기화")
+                            .foregroundStyle(hasValidCookies ? Color.primary : Color.secondary)
+                        if let date = lastSyncDate {
+                            Text("마지막: \(date.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if !hasValidCookies {
+                            Text("먼저 네이버 로그인이 필요합니다")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .disabled(!hasValidCookies || isQuickSyncing)
+
+            Button {
+                showingNaverSync = true
+            } label: {
+                Label(
+                    hasValidCookies ? "네이버 재로그인" : "네이버 로그인",
+                    systemImage: "globe"
+                )
+            }
+
+            if hasValidCookies {
+                Button(role: .destructive) {
+                    CookieStorage.clear()
+                    WordbookStorage.clear()
+                    hasValidCookies = false
+                    lastSyncDate = nil
+                    wordbookList = WordbookStorage.load()
+                } label: {
+                    Label("저장된 로그인 삭제", systemImage: "key.slash")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dataSection: some View {
+        Section("데이터") {
+            LabeledContent("저장된 단어", value: "\(allWords.count)개")
+
+            Button {
+                showingImporter = true
+            } label: {
+                Label("JSON 파일 불러오기", systemImage: "square.and.arrow.down")
+            }
+
+            Button(role: .destructive) {
+                showingDeleteAlert = true
+            } label: {
+                Label("전체 단어 삭제", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var backupSection: some View {
+        Section("백업 / 복원") {
+            Button {
+                backupNow()
+            } label: {
+                Label("백업 파일 만들기", systemImage: "arrow.up.doc")
+            }
+
+            Button {
+                showRestoreImporter = true
+            } label: {
+                Label("백업 파일에서 복원", systemImage: "arrow.down.doc")
+            }
+
+            Text("백업 파일은 단어 + 즐겨찾기 + 메모 + 통계까지 모두 저장합니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var resultSection: some View {
+        if let result = lastResult {
+            Section("최근 불러오기 결과") {
+                LabeledContent("추가됨", value: "\(result.inserted)개")
+                LabeledContent("건너뜀", value: "\(result.skipped)개")
+
+                ForEach(Array(result.skippedCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { reason in
+                    LabeledContent("  └ \(reason.rawValue)", value: "\(result.skippedCounts[reason] ?? 0)개")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !result.skippedItems.isEmpty {
+                    Button {
+                        showLogSheet = true
+                    } label: {
+                        Label("건너뛴 단어 보기", systemImage: "list.bullet.rectangle")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var infoSection: some View {
+        Section("정보") {
+            LabeledContent("버전", value: "1.0")
         }
     }
 
@@ -307,19 +333,33 @@ struct SettingsView: View {
         }
     }
 
-    private func clearWrongCounts() {
-        for w in allWords {
-            w.wrongCount = 0
-            w.isWrong = false
+    private func backupNow() {
+        do {
+            let url = try BackupService.exportToFile(context: context)
+            backupURL = url
+            showBackupShare = true
+        } catch {
+            backupAlertMessage = "백업 실패: \(error.localizedDescription)"
+            showBackupAlert = true
         }
-        try? context.save()
     }
 
-    private func clearFavorites() {
-        for w in allWords {
-            w.isFavorite = false
+    private func handleRestore(_ result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            guard let url = urls.first else { return }
+
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+
+            let data = try Data(contentsOf: url)
+            let res = try BackupService.restore(data: data, context: context, replaceAll: false)
+            backupAlertMessage = "복원 완료: \(res.restored)개 단어"
+            showBackupAlert = true
+        } catch {
+            backupAlertMessage = "복원 실패: \(error.localizedDescription)"
+            showBackupAlert = true
         }
-        try? context.save()
     }
 
     private func deleteAll() {

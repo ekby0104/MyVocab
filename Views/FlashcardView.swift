@@ -122,6 +122,15 @@ struct FlashcardView: View {
                         }
                     }
                 } else {
+                    Button {
+                        SpeechService.shared.speak(word.english)
+                    } label: {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                    }
+                    .buttonStyle(.plain)
+                    
                     Text(word.english)
                         .font(.system(size: 44, weight: .bold))
                         .multilineTextAlignment(.center)
@@ -152,6 +161,7 @@ struct FlashcardView: View {
             showBack = false
             index = (index + 1) % deck.count
         }
+        if let w = current { SpeechService.shared.speak(w.english) }  // 추가
     }
 
     private func prev() {

@@ -13,7 +13,16 @@ struct GameView: View {
     private var favoriteWords: [Word] {
         allWords.filter(\.isFavorite)
     }
-
+    
+    private var dueCount: Int {
+        let now = Date()
+        return allWords.filter { w in
+            guard !w.english.isEmpty, !w.meaning.isEmpty else { return false }
+            if let next = w.nextReviewDate { return next <= now }
+            return true  // 새 단어
+        }.count
+    }
+    
     var body: some View {
         NavigationStack {
             List {
@@ -21,8 +30,9 @@ struct GameView: View {
                     NavigationLink {
                         FlashcardView()
                     } label: {
+                        // 플래시카드
                         gameRow(
-                            icon: "rectangle.on.rectangle",
+                            emoji: "🎴",
                             title: "플래시카드",
                             subtitle: "카드를 뒤집으며 암기",
                             color: .blue
@@ -32,19 +42,22 @@ struct GameView: View {
                     NavigationLink {
                         QuizView(source: .all)
                     } label: {
+                        // 퀴즈
                         gameRow(
-                            icon: "checkmark.circle.fill",
+                            emoji: "🎯",
                             title: "퀴즈",
-                            subtitle: "전체 단어에서 4지선다",
+                            subtitle: "4지선다 문제 풀기",
                             color: .green
                         )
+
                     }
 
                     NavigationLink {
                         QuizView(source: .favorites)
                     } label: {
+                        // 즐겨찾기 퀴즈
                         gameRow(
-                            icon: "star.circle.fill",
+                            emoji: "⭐️",
                             title: "즐겨찾기 퀴즈",
                             subtitle: favoriteWords.isEmpty
                                 ? "즐겨찾기 단어가 없습니다"
@@ -54,13 +67,28 @@ struct GameView: View {
                     }
                     .disabled(favoriteWords.count < 4)
                 }
-
+                
                 Section("복습") {
+                    NavigationLink {
+                        QuizView(source: .dueToday)
+                    } label: {
+                        gameRow(
+                            emoji: "📅",
+                            title: "오늘의 복습",
+                            subtitle: dueCount == 0
+                                ? "복습할 단어가 없어요"
+                                : "\(dueCount)개 복습 대기 (SRS)",
+                            color: .purple
+                        )
+                    }
+                    .disabled(dueCount == 0)
+
                     NavigationLink {
                         QuizView(source: .wrongOnly)
                     } label: {
+                        // 틀린 단어 복습
                         gameRow(
-                            icon: "arrow.counterclockwise",
+                            emoji: "🔄",
                             title: "틀린 단어 복습",
                             subtitle: wrongWords.isEmpty
                                 ? "틀린 단어가 없습니다"
@@ -77,18 +105,23 @@ struct GameView: View {
                     }
                     .disabled(wrongWords.isEmpty)
                 }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "gamecontroller.fill")
-                            .foregroundStyle(Color.accentColor)
-                        Text("게임")
+                
+                Section("통계") {
+                    NavigationLink {
+                        StatsView()
+                    } label: {
+                        // 통계 (있다면)
+                        gameRow(
+                            emoji: "📊",
+                            title: "학습 통계",
+                            subtitle: "정답률 · 자주 틀리는 단어",
+                            color: .indigo
+                        )
                     }
-                    .font(.headline)
                 }
             }
+            .navigationTitle("🎮 게임")
+            .navigationBarTitleDisplayMode(.inline)
             .alert("전체 클리어", isPresented: $showClearAlert) {
                 Button("취소", role: .cancel) {}
                 Button("클리어", role: .destructive) { clearAllWrong() }
@@ -98,13 +131,12 @@ struct GameView: View {
         }
     }
 
-    private func gameRow(icon: String, title: String, subtitle: String, color: Color) -> some View {
+    private func gameRow(emoji: String, title: String, subtitle: String, color: Color) -> some View {
         HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.title)
-                .foregroundStyle(.white)
+            Text(emoji)
+                .font(.system(size: 28))
                 .frame(width: 48, height: 48)
-                .background(color)
+                .background(color.opacity(0.18))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 2) {
