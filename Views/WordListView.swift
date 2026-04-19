@@ -8,6 +8,9 @@ struct WordListView: View {
     @Environment(\.modelContext) private var context
     @State private var showAdd = false
 
+    // 뜻 보이기/숨기기 (앱 재시작해도 유지)
+    @AppStorage("wordList.showMeaning") private var showMeaning: Bool = true
+
     enum SortOrder: String, CaseIterable, Identifiable {
         case newest        = "최신순"
         case alphabet      = "알파벳"
@@ -41,7 +44,6 @@ struct WordListView: View {
         case .alphabetDesc:
             list.sort { $0.english.lowercased() > $1.english.lowercased() }
         case .favorite:
-            // 즐겨찾기 먼저, 그 안에서는 알파벳순
             list.sort { lhs, rhs in
                 if lhs.isFavorite != rhs.isFavorite {
                     return lhs.isFavorite && !rhs.isFavorite
@@ -49,8 +51,11 @@ struct WordListView: View {
                 return lhs.english.lowercased() < rhs.english.lowercased()
             }
         case .wrong:
-            // 오답 횟수 많은 순, 같으면 알파벳순
+            // isWrong 먼저 (현재 틀린 상태인 것 우선), 그 안에서 wrongCount 많은 순
             list.sort { lhs, rhs in
+                if lhs.isWrong != rhs.isWrong {
+                    return lhs.isWrong && !rhs.isWrong
+                }
                 if lhs.wrongCount != rhs.wrongCount {
                     return lhs.wrongCount > rhs.wrongCount
                 }
@@ -81,7 +86,7 @@ struct WordListView: View {
                     List {
                         ForEach(displayed) { word in
                             NavigationLink { WordDetailView(word: word) } label: {
-                                WordRow(word: word)
+                                WordRow(word: word, showMeaning: showMeaning)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                 Button {
@@ -114,10 +119,17 @@ struct WordListView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Picker("정렬", selection: $sortOrder) {
-                            ForEach(SortOrder.allCases) { order in
-                                Label(order.rawValue, systemImage: order.iconName)
-                                    .tag(order)
+                        Section("정렬") {
+                            Picker("정렬", selection: $sortOrder) {
+                                ForEach(SortOrder.allCases) { order in
+                                    Label(order.rawValue, systemImage: order.iconName)
+                                        .tag(order)
+                                }
+                            }
+                        }
+                        Section("표시") {
+                            Toggle(isOn: $showMeaning) {
+                                Label("뜻 보이기", systemImage: "eye")
                             }
                         }
                     } label: {
@@ -148,6 +160,8 @@ struct WordListView: View {
 
 struct WordRow: View {
     let word: Word
+    var showMeaning: Bool = true
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -175,7 +189,7 @@ struct WordRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if !word.meaning.isEmpty {
+            if showMeaning, !word.meaning.isEmpty {
                 Text(word.meaning)
                     .font(.subheadline)
                     .lineLimit(2)

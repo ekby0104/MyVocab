@@ -83,6 +83,43 @@ struct WordDetailView: View {
                             )
                         }
                     }
+
+                    if word.wrongCount > 0 {
+                            Button {
+                                word.wrongCount = 0
+                                try? context.save()
+                            } label: {
+                                Label("오답 카운트 초기화", systemImage: "minus.circle")
+                                    .font(.caption)
+                            }
+                            .tint(.red)
+                        }
+
+                        if word.isWrong {
+                            Button {
+                                word.isWrong = false
+                                try? context.save()
+                            } label: {
+                                Label("틀린 단어 해제", systemImage: "xmark.circle")
+                                    .font(.caption)
+                            }
+                            .tint(.orange)
+                        }
+
+                        if word.correctCount > 0 || word.wrongCount > 0 {
+                            Button(role: .destructive) {
+                                word.wrongCount = 0
+                                word.correctCount = 0
+                                word.isWrong = false
+                                word.srsLevel = 0
+                                word.nextReviewDate = nil
+                                word.lastReviewedAt = nil
+                                try? context.save()
+                            } label: {
+                                Label("학습 기록 초기화", systemImage: "arrow.counterclockwise")
+                                    .font(.caption)
+                            }
+                        }
                 }
 
                 section(title: "메모") {

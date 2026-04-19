@@ -1,19 +1,31 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 struct QuizView: View {
-    enum Source {
-        case all
-        case favorites
-        case wrongOnly
-        case dueToday    // 오늘 복습할 단어 (SRS)
-    }
-
-    let source: Source
-    init(source: Source = .all) { self.source = source }
-
     @Environment(\.modelContext) private var context
     @Query private var allWords: [Word]
+
+    // 시작 화면에서 선택
+    @State private var selectedSource: SourceType = .all
+    @State private var started = false
+
+    enum SourceType: String, CaseIterable, Identifiable {
+        case all       = "전체 단어"
+        case favorites = "즐겨찾기"
+        case wrongOnly = "틀린 단어"
+        case dueToday  = "오늘의 학습"
+        var id: String { rawValue }
+
+        var emoji: String {
+            switch self {
+            case .all:       return "📚"
+            case .favorites: return "⭐"
+            case .wrongOnly: return "🔄"
+            case .dueToday:  return "📅"
+            }
+        }
+    }
 
     enum Mode: String, CaseIterable, Identifiable {
         case enToKo = "영→한"
@@ -22,13 +34,17 @@ struct QuizView: View {
     }
 
     @State private var mode: Mode = .enToKo
-    @State private var started = false
     @State private var quizDeck: [Word] = []
     @State private var index = 0
     @State private var options: [Word] = []
     @State private var selectedId: String? = nil
     @State private var correctCount = 0
     @State private var wrongCount = 0
+
+    // 반응 시간 측정
+    @State private var questionShownAt: Date? = nil
+    @State private var wasSlowResponse: Bool = false
+    private let slowThreshold: TimeInterval = 5.0
 
     // 문제 수
     @State private var quizCount: Int = 20
@@ -40,32 +56,23 @@ struct QuizView: View {
         return quizDeck[index]
     }
 
-    private var sourcePool: [Word] {
+    private func wordsForSource(_ source: SourceType) -> [Word] {
         let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
         switch source {
         case .all:        return base
         case .favorites:  return base.filter(\.isFavorite)
         case .wrongOnly:  return base.filter(\.isWrong)
         case .dueToday:
-            // SRS: 복습 예정일이 지났거나, 한 번도 학습 안 한 새 단어
             let now = Date()
             return base.filter { w in
                 if let next = w.nextReviewDate { return next <= now }
-                return true   // 새 단어도 복습 대상
+                return true
             }
         }
     }
 
-    private var title: String {
-        switch source {
-        case .wrongOnly: return "틀린 단어 복습"
-        case .dueToday:  return "오늘의 복습"
-        case .favorites: return "즐겨찾기 퀴즈"
-        case .all:       return "퀴즈"
-        }
-    }
+    private var sourcePool: [Word] { wordsForSource(selectedSource) }
 
-    // 실제 출제될 문제 수 계산
     private var effectiveCount: Int {
         min(quizCount, sourcePool.count)
     }
@@ -85,9 +92,9 @@ struct QuizView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
-                    Image(systemName: source == .wrongOnly ? "arrow.counterclockwise" : source == .favorites ? "star.circle.fill" : "checkmark.circle.fill")
-                        .foregroundStyle(source == .wrongOnly ? Color.orange : source == .favorites ? Color.yellow : Color.accentColor)
-                    Text(title)
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.accentColor)
+                    Text("퀴즈")
                 }
                 .font(.headline)
             }
@@ -99,71 +106,78 @@ struct QuizView: View {
     private var startScreen: some View {
         ScrollView {
             VStack(spacing: 20) {
-                Image(systemName: source == .wrongOnly ? "arrow.counterclockwise.circle" : source == .favorites ? "star.circle" : "checkmark.circle")
+                Image(systemName: "checkmark.circle")
                     .font(.system(size: 64))
-                    .foregroundStyle(source == .wrongOnly ? Color.orange : source == .favorites ? Color.yellow : Color.accentColor)
+                    .foregroundStyle(Color.accentColor)
 
-                Text(title)
+                Text("퀴즈")
                     .font(.title.bold())
+
+                // 소스 선택
+                VStack(spacing: 10) {
+                    ForEach(SourceType.allCases) { source in
+                        let count = wordsForSource(source).count
+                        Button {
+                            selectedSource = source
+                        } label: {
+                            HStack {
+                                Text(source.emoji).font(.title3)
+                                Text(source.rawValue).font(.headline)
+                                Spacer()
+                                Text("\(count)개")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: selectedSource == source ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selectedSource == source ? .blue : .secondary)
+                            }
+                            .padding()
+                            .background(
+                                selectedSource == source
+                                    ? Color.blue.opacity(0.1)
+                                    : Color(.secondarySystemBackground)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(count < 4)
+                        .opacity(count < 4 ? 0.5 : 1.0)
+                    }
+                }
 
                 Picker("모드", selection: $mode) {
                     ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
 
-                if source != .wrongOnly {
-                    countSelector
-                }
+                countSelector
 
-                switch source {
-                case .wrongOnly:
-                    Text("틀린 단어 \(sourcePool.count)개를 복습합니다.\n맞추면 자동으로 클리어됩니다.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                case .dueToday:
-                    Text("오늘 복습할 단어 \(sourcePool.count)개를 학습합니다.\n맞추면 다음 복습 일정이 연장돼요.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                case .favorites:
-                    Text("즐겨찾기 \(sourcePool.count)개 중 \(effectiveCount)개가 출제됩니다.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                case .all:
-                    Text("전체 단어 \(sourcePool.count)개 중 \(effectiveCount)개가 출제됩니다.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text("💡 5초 안에 답하지 않으면 오답으로 처리돼요")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Button {
                     start()
                 } label: {
-                    Text("시작")
+                    Text("시작 (\(effectiveCount)문제)")
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canStart)
+                .disabled(sourcePool.count < 4)
 
-                if !canStart {
-                    Text(source == .wrongOnly
-                         ? "복습할 틀린 단어가 없습니다."
-                         : "단어가 4개 이상 필요합니다.")
-                        .font(.caption)
-                        .foregroundStyle(.red)
+                if sourcePool.count < 4 {
+                    Text("단어가 4개 이상 필요합니다.")
+                        .font(.caption).foregroundStyle(.red)
                 }
             }
             .padding()
         }
     }
 
-    // 문제 수 선택 UI
     private var countSelector: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("문제 수")
-                    .font(.subheadline)
+                Text("문제 수").font(.subheadline)
                 Spacer()
                 Picker("프리셋", selection: $quizCount) {
                     ForEach(countOptions, id: \.self) { n in
@@ -174,30 +188,21 @@ struct QuizView: View {
             }
 
             HStack(spacing: 8) {
-                Text("직접 입력")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("직접 입력").font(.caption).foregroundStyle(.secondary)
                 TextField("예: 35", text: $customCountText)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 100)
                     .onChange(of: customCountText) { _, newValue in
-                        // 숫자만 추출
                         let filtered = newValue.filter { $0.isNumber }
-                        if filtered != newValue {
-                            customCountText = filtered
-                        }
+                        if filtered != newValue { customCountText = filtered }
                         if let n = Int(filtered), n > 0 {
                             quizCount = min(n, 1000)
                         }
                     }
-                Text("개")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("개").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("현재: \(quizCount)개")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("현재: \(quizCount)개").font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding()
@@ -205,15 +210,11 @@ struct QuizView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    private var canStart: Bool {
-        allWords.count >= 4 && !sourcePool.isEmpty
-    }
-
     // MARK: - Quiz
 
     @ViewBuilder
     private func quizScreen(word: Word) -> some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             HStack {
                 Text("\(index + 1) / \(quizDeck.count)")
                 Spacer()
@@ -226,7 +227,7 @@ struct QuizView: View {
                 Text(questionText(for: word))
                     .font(.system(size: mode == .koToEn ? 24 : 36, weight: .bold))
                     .multilineTextAlignment(.center)
-                
+
                 if mode == .enToKo {
                     Button {
                         SpeechService.shared.speak(word.english)
@@ -236,7 +237,7 @@ struct QuizView: View {
                             .foregroundStyle(.blue)
                     }
                 }
-                
+
                 if mode == .enToKo, !word.pronunciation.isEmpty {
                     Text(word.pronunciation)
                         .font(.body)
@@ -244,7 +245,7 @@ struct QuizView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 30)
+            .padding(.vertical, 24)
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16))
 
@@ -269,6 +270,10 @@ struct QuizView: View {
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
             }
+        }
+        .onAppear { startTimer() }
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
+            checkSlowResponse()
         }
     }
 
@@ -297,7 +302,7 @@ struct QuizView: View {
             Text("완료!").font(.largeTitle.bold())
             Text("정답 \(correctCount) / \(correctCount + wrongCount)")
                 .font(.title2)
-            if source == .wrongOnly && correctCount > 0 {
+            if selectedSource == .wrongOnly && correctCount > 0 {
                 Text("\(correctCount)개 클리어됨")
                     .font(.subheadline)
                     .foregroundStyle(.green)
@@ -307,12 +312,31 @@ struct QuizView: View {
         }
     }
 
+    // MARK: - Timer
+
+    private func startTimer() {
+        questionShownAt = .now
+        wasSlowResponse = false
+    }
+
+    private func checkSlowResponse() {
+        guard selectedId == nil, let start = questionShownAt,
+              let word = current else { return }
+        if Date().timeIntervalSince(start) >= slowThreshold && !wasSlowResponse {
+            wasSlowResponse = true
+            selectedId = word.id
+            wrongCount += 1
+            SRSService.wrong(word)
+            try? context.save()
+        }
+    }
+
     // MARK: - Logic
 
     private func start() {
         var src = sourcePool
         src.shuffle()
-        quizDeck = source == .wrongOnly ? src : Array(src.prefix(quizCount))
+        quizDeck = selectedSource == .wrongOnly ? src : Array(src.prefix(quizCount))
         index = 0
         correctCount = 0
         wrongCount = 0
@@ -329,16 +353,17 @@ struct QuizView: View {
         distractors.shuffle()
         options = distractors
         selectedId = nil
+        startTimer()
     }
 
     private func answer(selected: Word, correct: Word) {
         selectedId = selected.id
         if selected.id == correct.id {
             correctCount += 1
-            SRSService.correct(correct)   // 정답 → 레벨 +1, 다음 복습일 갱신
+            SRSService.correct(correct)
         } else {
             wrongCount += 1
-            SRSService.wrong(correct)     // 오답 → 레벨 0, 즉시 복습
+            SRSService.wrong(correct)
         }
         try? context.save()
     }

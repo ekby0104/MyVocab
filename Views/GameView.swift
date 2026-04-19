@@ -5,24 +5,23 @@ struct GameView: View {
     @Environment(\.modelContext) private var context
     @Query private var allWords: [Word]
     @State private var showClearAlert = false
+    @State private var showResetAlert = false
+    @State private var showResetWrongAlert = false
+    @State private var showResetAllAlert = false
 
     private var wrongWords: [Word] {
         allWords.filter(\.isWrong)
     }
 
-    private var favoriteWords: [Word] {
-        allWords.filter(\.isFavorite)
-    }
-    
     private var dueCount: Int {
         let now = Date()
         return allWords.filter { w in
             guard !w.english.isEmpty, !w.meaning.isEmpty else { return false }
             if let next = w.nextReviewDate { return next <= now }
-            return true  // 새 단어
+            return true
         }.count
     }
-    
+
     var body: some View {
         NavigationStack {
             List {
@@ -30,7 +29,6 @@ struct GameView: View {
                     NavigationLink {
                         FlashcardView()
                     } label: {
-                        // 플래시카드
                         gameRow(
                             emoji: "🎴",
                             title: "플래시카드",
@@ -40,77 +38,56 @@ struct GameView: View {
                     }
 
                     NavigationLink {
-                        QuizView(source: .all)
+                        QuizView()
                     } label: {
-                        // 퀴즈
                         gameRow(
                             emoji: "🎯",
                             title: "퀴즈",
                             subtitle: "4지선다 문제 풀기",
                             color: .green
                         )
-
                     }
 
                     NavigationLink {
-                        QuizView(source: .favorites)
-                    } label: {
-                        // 즐겨찾기 퀴즈
-                        gameRow(
-                            emoji: "⭐️",
-                            title: "즐겨찾기 퀴즈",
-                            subtitle: favoriteWords.isEmpty
-                                ? "즐겨찾기 단어가 없습니다"
-                                : "즐겨찾기 \(favoriteWords.count)개에서 출제",
-                            color: .yellow
-                        )
-                    }
-                    .disabled(favoriteWords.count < 4)
-                }
-                
-                Section("복습") {
-                    NavigationLink {
-                        QuizView(source: .dueToday)
+                        MatchingGameView()
                     } label: {
                         gameRow(
-                            emoji: "📅",
-                            title: "오늘의 복습",
-                            subtitle: dueCount == 0
-                                ? "복습할 단어가 없어요"
-                                : "\(dueCount)개 복습 대기 (SRS)",
+                            emoji: "🔀",
+                            title: "단어 매칭",
+                            subtitle: "영어-한글 짝 맞추기 (30초)",
                             color: .purple
                         )
                     }
-                    .disabled(dueCount == 0)
+                }
 
-                    NavigationLink {
-                        QuizView(source: .wrongOnly)
+                Section("관리") {
+                    Button {
+                        showClearAlert = true
                     } label: {
-                        // 틀린 단어 복습
-                        gameRow(
-                            emoji: "🔄",
-                            title: "틀린 단어 복습",
-                            subtitle: wrongWords.isEmpty
-                                ? "틀린 단어가 없습니다"
-                                : "\(wrongWords.count)개 복습 대기",
-                            color: .orange
-                        )
+                        Label("틀린 단어 전체 해제", systemImage: "xmark.circle")
                     }
+                    .tint(.orange)
                     .disabled(wrongWords.isEmpty)
 
                     Button(role: .destructive) {
-                        showClearAlert = true
+                        showResetWrongAlert = true
                     } label: {
-                        Label("틀린 단어 전체 클리어", systemImage: "trash")
+                        Label("오답 기록 전체 초기화", systemImage: "minus.circle")
                     }
-                    .disabled(wrongWords.isEmpty)
+                    .disabled(allWords.filter({ $0.wrongCount > 0 }).isEmpty)
+
+                    Button(role: .destructive) {
+                        showResetAllAlert = true
+                    } label: {
+                        Label("학습 기록 전체 초기화", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(allWords.filter({ $0.correctCount > 0 || $0.wrongCount > 0 }).isEmpty)
                 }
-                
+
                 Section("통계") {
                     NavigationLink {
                         StatsView()
                     } label: {
-                        // 통계 (있다면)
                         gameRow(
                             emoji: "📊",
                             title: "학습 통계",
@@ -122,11 +99,23 @@ struct GameView: View {
             }
             .navigationTitle("🎮 게임")
             .navigationBarTitleDisplayMode(.inline)
-            .alert("전체 클리어", isPresented: $showClearAlert) {
+            .alert("틀린 단어 전체 해제", isPresented: $showClearAlert) {
                 Button("취소", role: .cancel) {}
-                Button("클리어", role: .destructive) { clearAllWrong() }
+                Button("해제", role: .destructive) { clearAllWrong() }
             } message: {
-                Text("틀린 단어 \(wrongWords.count)개가 모두 클리어됩니다.")
+                Text("틀린 단어 \(wrongWords.count)개의 틀린 상태가 해제됩니다.\n오답 횟수는 유지됩니다.")
+            }
+            .alert("오답 기록 전체 초기화", isPresented: $showResetWrongAlert) {
+                Button("취소", role: .cancel) {}
+                Button("초기화", role: .destructive) { resetAllWrongCounts() }
+            } message: {
+                Text("모든 단어의 오답 횟수가 0으로 초기화됩니다.\n통계 및 TOP 10이 리셋됩니다.")
+            }
+            .alert("학습 기록 전체 초기화", isPresented: $showResetAllAlert) {
+                Button("취소", role: .cancel) {}
+                Button("초기화", role: .destructive) { resetAllLearning() }
+            } message: {
+                Text("모든 단어의 정답·오답·SRS·틀린 상태가\n전부 초기화됩니다. 되돌릴 수 없습니다.")
             }
         }
     }
@@ -149,6 +138,25 @@ struct GameView: View {
 
     private func clearAllWrong() {
         for w in wrongWords { w.isWrong = false }
+        try? context.save()
+    }
+
+    private func resetAllWrongCounts() {
+        for w in allWords where w.wrongCount > 0 {
+            w.wrongCount = 0
+        }
+        try? context.save()
+    }
+    
+    private func resetAllLearning() {
+        for w in allWords where w.correctCount > 0 || w.wrongCount > 0 {
+            w.correctCount = 0
+            w.wrongCount = 0
+            w.isWrong = false
+            w.srsLevel = 0
+            w.nextReviewDate = nil
+            w.lastReviewedAt = nil
+        }
         try? context.save()
     }
 }

@@ -108,7 +108,7 @@ enum BackupService {
         }
 
         var restored = 0
-        var skipped = 0
+        let skipped = 0
 
         for backup in file.words {
             let key = backup.english.lowercased()

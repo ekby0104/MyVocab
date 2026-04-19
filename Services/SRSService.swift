@@ -24,38 +24,43 @@ enum SRSService {
         word.isWrong = false
     }
 
+    /// 찍어서 맞춘 경우: 통계는 정답이지만 SRS 레벨은 올리지 않음
+    /// (유저가 직접 "몰랐어요" 눌렀거나 반응 시간이 너무 느렸을 때)
+    static func guessed(_ word: Word) {
+        // 레벨 유지, 다음 복습은 가까운 시일로
+        word.srsLevel = max(word.srsLevel, 0)
+        word.nextReviewDate = .now  // 즉시 복습 대기열에
+        word.lastReviewedAt = .now
+        word.correctCount += 1      // 통계는 정답으로 카운트
+        word.isWrong = true         // 틀린 단어 목록에 넣기 (재복습 대상)
+    }
+
     /// 오답 시: 레벨 0으로 리셋, 즉시 복습 대상
     static func wrong(_ word: Word) {
         word.srsLevel = 0
-        word.nextReviewDate = .now   // 즉시
+        word.nextReviewDate = .now
         word.lastReviewedAt = .now
         word.wrongCount += 1
         word.isWrong = true
     }
 
-    /// 레벨에 해당하는 다음 복습 날짜 계산
     private static func nextDate(for level: Int) -> Date {
         let days = intervalsInDays[min(level, maxLevel)]
         return Calendar.current.date(byAdding: .day, value: days, to: .now) ?? .now
     }
 
-    /// 오늘 복습할 단어 필터링 (nextReviewDate <= 지금)
     static func dueWords(from words: [Word]) -> [Word] {
         let now = Date()
         return words.filter { w in
-            guard let next = w.nextReviewDate else {
-                return false   // 한 번도 학습 안 한 건 due 아님 (별도 처리)
-            }
+            guard let next = w.nextReviewDate else { return false }
             return next <= now
         }
     }
 
-    /// 한 번도 학습 안 한 새 단어들
     static func newWords(from words: [Word]) -> [Word] {
         words.filter { $0.nextReviewDate == nil }
     }
 
-    /// 레벨별 단어 수 분포
     static func levelDistribution(from words: [Word]) -> [Int: Int] {
         var dist: [Int: Int] = [:]
         for w in words {
