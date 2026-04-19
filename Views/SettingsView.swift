@@ -23,7 +23,6 @@ struct SettingsView: View {
     @State private var lastSyncDate: Date? = CookieStorage.lastSyncDate
 
     // 백업/복원
-    @State private var showBackupShare = false
     @State private var backupURL: URL? = nil
     @State private var showRestoreImporter = false
     @State private var backupAlertMessage: String? = nil
@@ -72,10 +71,8 @@ struct SettingsView: View {
             }) {
                 NaverSyncView()
             }
-            .sheet(isPresented: $showBackupShare) {
-                if let url = backupURL {
-                    ShareSheet(items: [url])
-                }
+            .sheet(item: $backupURL) { url in
+                ShareSheet(items: [url])
             }
             .sheet(isPresented: $showLogSheet) {
                 if let result = lastResult {
@@ -332,12 +329,10 @@ struct SettingsView: View {
             errorMessage = error.localizedDescription
         }
     }
-
+    
     private func backupNow() {
         do {
-            let url = try BackupService.exportToFile(context: context)
-            backupURL = url
-            showBackupShare = true
+            backupURL = try BackupService.exportToFile(context: context)
         } catch {
             backupAlertMessage = "백업 실패: \(error.localizedDescription)"
             showBackupAlert = true
@@ -424,4 +419,8 @@ struct SkippedLogView: View {
         case .parseFailed: return .red
         }
     }
+}
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
 }

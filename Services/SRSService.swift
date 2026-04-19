@@ -38,10 +38,12 @@ enum SRSService {
     /// 오답 시: 레벨 0으로 리셋, 즉시 복습 대상
     static func wrong(_ word: Word) {
         word.srsLevel = 0
-        word.nextReviewDate = .now
+//        word.nextReviewDate = .now
+        word.nextReviewDate = Calendar.current.date(byAdding: .day, value: 1, to: .now)
         word.lastReviewedAt = .now
         word.wrongCount += 1
         word.isWrong = true
+
     }
 
     private static func nextDate(for level: Int) -> Date {

@@ -59,6 +59,19 @@ struct GameView: View {
                         )
                     }
                 }
+                
+                Section("통계") {
+                    NavigationLink {
+                        StatsView()
+                    } label: {
+                        gameRow(
+                            emoji: "📊",
+                            title: "학습 통계",
+                            subtitle: "정답률 · 자주 틀리는 단어",
+                            color: .indigo
+                        )
+                    }
+                }
 
                 Section("관리") {
                     Button {
@@ -82,19 +95,6 @@ struct GameView: View {
                         Label("학습 기록 전체 초기화", systemImage: "arrow.counterclockwise")
                     }
                     .disabled(allWords.filter({ $0.correctCount > 0 || $0.wrongCount > 0 }).isEmpty)
-                }
-
-                Section("통계") {
-                    NavigationLink {
-                        StatsView()
-                    } label: {
-                        gameRow(
-                            emoji: "📊",
-                            title: "학습 통계",
-                            subtitle: "정답률 · 자주 틀리는 단어",
-                            color: .indigo
-                        )
-                    }
                 }
             }
             .navigationTitle("🎮 게임")

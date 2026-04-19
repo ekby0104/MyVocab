@@ -89,6 +89,16 @@ struct MatchingGameView: View {
                 }
                 .font(.headline)
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                if started {
+                    Button {
+                        stopTimer()
+                        started = false
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                    }
+                }
+            }
         }
         .onDisappear { stopTimer() }
     }
@@ -266,20 +276,17 @@ struct MatchingGameView: View {
                     .font(.title2)
             }
 
-            VStack(spacing: 4) {
-                Text("정답 \(correctCount) · 오답 \(wrongCount)")
-                    .font(.subheadline)
-                if !success {
-                    Text("매칭 \(matchedPairs.count)/\(totalPairs)쌍")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Text("정답 \(correctCount) · 오답 \(wrongCount)")
+                .font(.subheadline)
 
-            Button("다시 하기") {
-                started = false
+            Text("다음 게임이 곧 시작됩니다...")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                startGame()
             }
-            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -361,11 +368,11 @@ struct MatchingGameView: View {
             wrongCount += 1
             wrongFlash = [firstCard.id, secondCard.id]
 
-            for wid in [firstCard.wordId, secondCard.wordId] {
-                if let word = gameWords.first(where: { $0.id == wid }) {
-                    SRSService.wrong(word)
-                    try? context.save()
-                }
+            // 영어 카드 쪽 단어만 오답 처리
+            let englishCard = firstCard.isEnglish ? firstCard : secondCard
+            if let word = gameWords.first(where: { $0.id == englishCard.wordId }) {
+                SRSService.wrong(word)
+                try? context.save()
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {

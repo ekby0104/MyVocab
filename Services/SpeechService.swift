@@ -8,9 +8,16 @@ final class SpeechService {
     private let synthesizer = AVSpeechSynthesizer()
 
     private init() {
-        // 다른 앱과 오디오 충돌 방지
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
+        
+        // 음성 엔진 워밍업 (첫 호출 지연 방지)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let warmup = AVSpeechUtterance(string: " ")
+            warmup.voice = AVSpeechSynthesisVoice(language: "en-US")
+            warmup.volume = 0
+            self.synthesizer.speak(warmup)
+        }
     }
 
     /// 영어 단어 또는 문장 발음
