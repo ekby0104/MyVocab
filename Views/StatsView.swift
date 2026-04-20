@@ -3,6 +3,7 @@ import SwiftData
 
 struct StatsView: View {
     @Query private var allWords: [Word]
+    @State private var selectedLevel: Int? = nil
 
     private var totalWords: Int { allWords.count }
     private var favoriteCount: Int { allWords.filter(\.isFavorite).count }
@@ -79,6 +80,9 @@ struct StatsView: View {
             }
             .navigationTitle("통계")
             .background(Color(.systemGroupedBackground))
+            .sheet(item: $selectedLevel) { level in
+                LevelWordsView(level: level, allWords: allWords)
+            }
         }
     }
 
@@ -149,24 +153,37 @@ struct StatsView: View {
                 .foregroundStyle(.secondary)
 
             ForEach(levelDistribution, id: \.level) { item in
-                HStack {
-                    Text("Lv.\(item.level)")
-                        .font(.caption.monospaced())
-                        .frame(width: 36, alignment: .leading)
-                    GeometryReader { geo in
-                        let maxCount = max(levelDistribution.map(\.count).max() ?? 1, 1)
-                        let width = CGFloat(item.count) / CGFloat(maxCount) * geo.size.width
-                        Rectangle()
-                            .fill(levelColor(item.level))
-                            .frame(width: width, height: 16)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                Button {
+                    if item.count > 0 {
+                        selectedLevel = item.level
                     }
-                    .frame(height: 16)
-                    Text("\(item.count)")
-                        .font(.caption.monospaced())
-                        .frame(width: 40, alignment: .trailing)
-                        .foregroundStyle(.secondary)
+                } label: {
+                    HStack {
+                        Text("Lv.\(item.level)")
+                            .font(.caption.monospaced())
+                            .frame(width: 36, alignment: .leading)
+                        GeometryReader { geo in
+                            let maxCount = max(levelDistribution.map(\.count).max() ?? 1, 1)
+                            let width = CGFloat(item.count) / CGFloat(maxCount) * geo.size.width
+                            Rectangle()
+                                .fill(levelColor(item.level))
+                                .frame(width: width, height: 16)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        .frame(height: 16)
+                        Text("\(item.count)")
+                            .font(.caption.monospaced())
+                            .frame(width: 40, alignment: .trailing)
+                            .foregroundStyle(.secondary)
+                        if item.count > 0 {
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(item.count == 0)
             }
         }
         .padding()
@@ -232,6 +249,76 @@ struct StatsView: View {
         case 1: return .orange
         case 2: return .yellow
         default: return .gray
+        }
+    }
+    
+}
+extension Int: @retroactive Identifiable {
+    public var id: Int { self }
+}
+
+// MARK: - Level Words View
+
+struct LevelWordsView: View {
+    let level: Int
+    let allWords: [Word]
+    @Environment(\.dismiss) private var dismiss
+
+    private var words: [Word] {
+        allWords.filter { $0.srsLevel == level }
+            .sorted { $0.english.lowercased() < $1.english.lowercased() }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(words) { word in
+                    NavigationLink {
+                        WordDetailView(word: word)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(word.english)
+                                    .font(.headline)
+                                Spacer()
+                                if word.isWrong {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.orange)
+                                }
+                                if word.isFavorite {
+                                    Image(systemName: "star.fill")
+                                        .foregroundStyle(.yellow)
+                                }
+                            }
+                            if !word.meaning.isEmpty {
+                                Text(word.meaning)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            HStack {
+                                Text("✓\(word.correctCount)")
+                                    .foregroundStyle(.green)
+                                Text("✗\(word.wrongCount)")
+                                    .foregroundStyle(.red)
+                                if let date = word.lastReviewedAt {
+                                    Text("최근: \(date.formatted(date: .abbreviated, time: .omitted))")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.caption2)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .navigationTitle("Lv.\(level) 단어 (\(words.count)개)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("닫기") { dismiss() }
+                }
+            }
         }
     }
 }

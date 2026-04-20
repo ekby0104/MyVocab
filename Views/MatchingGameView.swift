@@ -26,6 +26,7 @@ struct MatchingGameView: View {
     @State private var correctCount = 0
     @State private var wrongCount = 0
     @State private var gameWords: [Word] = []
+    @State private var selectedWord: Word? = nil
 
     private let totalPairs = 8
     private let timeLimit: TimeInterval = 30.0
@@ -262,32 +263,97 @@ struct MatchingGameView: View {
 
     // MARK: - Result Screen
 
+    // 미매칭 단어별 색상
+    private let pairColors: [Color] = [
+        .red, .orange, .yellow, .green, .blue, .purple, .pink, .cyan
+    ]
+
+    private var unmatchedWords: [Word] {
+        gameWords.filter { !matchedPairs.contains($0.id) }
+    }
+
     private func resultScreen(success: Bool) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: success ? "trophy.fill" : "clock.badge.xmark.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(success ? .yellow : .red)
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(systemName: success ? "trophy.fill" : "clock.badge.xmark.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(success ? .yellow : .red)
 
-            Text(success ? "클리어!" : "시간 초과!")
-                .font(.largeTitle.bold())
+                Text(success ? "클리어!" : "시간 초과!")
+                    .font(.title.bold())
 
-            if success {
-                Text(String(format: "%.1f초 만에 완료!", timeLimit - timeRemaining))
-                    .font(.title2)
+                if success {
+                    Text(String(format: "%.1f초 만에 완료!", timeLimit - timeRemaining))
+                        .font(.title3)
+                }
+
+                Text("정답 \(correctCount) · 오답 \(wrongCount)")
+                    .font(.subheadline)
+
+                // 미매칭 단어 정답 표시
+                if !unmatchedWords.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("못 맞춘 단어")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+
+                        ForEach(Array(unmatchedWords.enumerated()), id: \.element.id) { idx, word in
+                            let color = pairColors[idx % pairColors.count]
+                            Button {
+                                selectedWord = word
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text(word.english)
+                                        .font(.system(size: 14, weight: .bold))
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 8)
+                                        .background(color.opacity(0.2))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    Image(systemName: "equal")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    Text(word.meaning)
+                                        .font(.system(size: 13))
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 8)
+                                        .background(color.opacity(0.2))
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
+                Button("다음 게임") {
+                    startGame()
+                }
+                .buttonStyle(.borderedProminent)
+                }
             }
-
-            Text("정답 \(correctCount) · 오답 \(wrongCount)")
-                .font(.subheadline)
-
-            Text("다음 게임이 곧 시작됩니다...")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                startGame()
+            .sheet(item: $selectedWord) { word in
+                NavigationStack {
+                    WordDetailView(word: word)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("닫기") {
+                                    selectedWord = nil
+                                }
+                            }
+                        }
+                }
             }
-        }
     }
 
     // MARK: - Game Logic
