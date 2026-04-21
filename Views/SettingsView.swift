@@ -2,8 +2,11 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 
+// MARK: - SettingsView (목업 구조 · profile-card + settings-group/srow)
+
 struct SettingsView: View {
     @Environment(\.modelContext) private var context
+    @Environment(\.displayScale) private var displayScale
     @Query private var allWords: [Word]
     @AppStorage("selectedWordbookId") private var selectedWordbookId: String = ""
 
@@ -22,48 +25,67 @@ struct SettingsView: View {
     @State private var hasValidCookies = CookieStorage.hasValidCookies
     @State private var lastSyncDate: Date? = CookieStorage.lastSyncDate
 
-    // 백업/복원
     @State private var backupURL: URL? = nil
     @State private var showRestoreImporter = false
     @State private var backupAlertMessage: String? = nil
     @State private var showBackupAlert = false
 
+    @State private var showWordbookPicker = false
+
     private var selectedWordbook: Wordbook {
         wordbookList.first { $0.id == selectedWordbookId } ?? .all
     }
 
-    private var wordbookBinding: Binding<Wordbook> {
-        Binding(
-            get: { selectedWordbook },
-            set: { selectedWordbookId = $0.id }
-        )
-    }
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
-            Form {
-                naverSyncSection
-                dataSection
-                backupSection
-                resultSection
-                infoSection
+            VStack(spacing: 0) {
+                topBar
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        profileCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 14)
+
+                        naverGroup
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        dataGroup
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        backupGroup
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        if lastResult != nil {
+                            resultGroup
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 12)
+                        }
+
+                        infoGroup
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 24)
+                    }
+                }
+                .scrollIndicators(.hidden)
             }
-            .navigationTitle("⚙️ 설정")
-            .navigationBarTitleDisplayMode(.inline)
+            .background(Theme.surface)
+            .navigationBarHidden(true)
             .fileImporter(
                 isPresented: $showingImporter,
                 allowedContentTypes: [.json],
                 allowsMultipleSelection: false
-            ) { result in
-                handleImport(result)
-            }
+            ) { handleImport($0) }
             .fileImporter(
                 isPresented: $showRestoreImporter,
                 allowedContentTypes: [.json],
                 allowsMultipleSelection: false
-            ) { result in
-                handleRestore(result)
-            }
+            ) { handleRestore($0) }
             .sheet(isPresented: $showingNaverSync, onDismiss: {
                 hasValidCookies = CookieStorage.hasValidCookies
                 lastSyncDate = CookieStorage.lastSyncDate
@@ -78,6 +100,9 @@ struct SettingsView: View {
                 if let result = lastResult {
                     SkippedLogView(result: result)
                 }
+            }
+            .sheet(isPresented: $showWordbookPicker) {
+                wordbookPickerSheet
             }
             .alert("전체 삭제", isPresented: $showingDeleteAlert) {
                 Button("취소", role: .cancel) {}
@@ -106,159 +131,422 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Top bar
 
-    @ViewBuilder
-    private var naverSyncSection: some View {
-        Section("네이버 동기화") {
-            Picker(selection: wordbookBinding) {
-                ForEach(wordbookList) { wb in
-                    Text(wb.name).tag(wb)
+    private var topBar: some View {
+        HStack {
+            Text("설정")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .tracking(-0.5)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - Profile card
+
+    private var profileCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 14) {
+                // Avatar
+                ZStack {
+                    Circle()
+                        .fill(Theme.chipBg)
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Theme.muted)
                 }
-            } label: {
-                Label("단어장", systemImage: "books.vertical")
-            }
+                .frame(width: 48, height: 48)
 
-            Button {
-                Task { await refreshWordbookList() }
-            } label: {
-                HStack {
-                    if isRefreshingList {
-                        ProgressView().controlSize(.small).padding(.trailing, 4)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .foregroundStyle(.blue)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("단어장 목록 새로고침")
-                            .foregroundStyle(hasValidCookies ? Color.primary : Color.secondary)
-                        Text(wordbookList.count > 1
-                             ? "\(wordbookList.count - 1)개 단어장 불러옴"
-                             : "아직 목록을 가져오지 않았어요")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("나의 단어장")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .tracking(-0.2)
+                    Text(selectedWordbook.name)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.muted)
                 }
-            }
-            .disabled(!hasValidCookies || isRefreshingList)
 
-            Button {
-                Task { await quickSync() }
-            } label: {
-                HStack {
-                    if isQuickSyncing {
-                        ProgressView().controlSize(.small).padding(.trailing, 4)
-                    } else {
-                        Image(systemName: "bolt.fill").foregroundStyle(.yellow)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(selectedWordbook.name) 빠른 동기화")
-                            .foregroundStyle(hasValidCookies ? Color.primary : Color.secondary)
-                        if let date = lastSyncDate {
-                            Text("마지막: \(date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else if !hasValidCookies {
-                            Text("먼저 네이버 로그인이 필요합니다")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                Spacer()
             }
-            .disabled(!hasValidCookies || isQuickSyncing)
+            .padding(.bottom, 12)
 
-            Button {
-                showingNaverSync = true
-            } label: {
-                Label(
-                    hasValidCookies ? "네이버 재로그인" : "네이버 로그인",
-                    systemImage: "globe"
+            // Ribbon (metrics)
+            HStack(spacing: 0) {
+                ribbonItem(value: "\(allWords.count)", label: "단어")
+                Rectangle().fill(Theme.line).frame(width: 0.5, height: 28)
+                ribbonItem(value: "\(allWords.filter(\.isFavorite).count)", label: "즐겨찾기")
+                Rectangle().fill(Theme.line).frame(width: 0.5, height: 28)
+                ribbonItem(value: "\(allWords.filter { $0.srsLevel >= 5 }.count)", label: "마스터")
+            }
+            .padding(.vertical, 10)
+            .background(Theme.chipBg)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(14)
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func ribbonItem(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Settings groups
+
+    private var naverGroup: some View {
+        settingsGroup(title: "네이버 동기화") {
+            srow(
+                icon: "books.vertical",
+                title: "단어장",
+                sub: selectedWordbook.name,
+                trailing: .chevron,
+                action: { showWordbookPicker = true }
+            )
+            srow(
+                icon: "arrow.triangle.2.circlepath",
+                title: "단어장 목록 새로고침",
+                sub: wordbookList.count > 1
+                    ? "\(wordbookList.count - 1)개 단어장 불러옴"
+                    : "아직 목록을 가져오지 않았어요",
+                trailing: isRefreshingList ? .progress : .chevron,
+                disabled: !hasValidCookies || isRefreshingList,
+                action: { Task { await refreshWordbookList() } }
+            )
+            srow(
+                icon: "bolt",
+                title: "\(selectedWordbook.name) 빠른 동기화",
+                sub: quickSyncSubtitle,
+                trailing: isQuickSyncing ? .progress : .chevron,
+                disabled: !hasValidCookies || isQuickSyncing,
+                action: { Task { await quickSync() } }
+            )
+            srow(
+                icon: "globe",
+                title: hasValidCookies ? "네이버 재로그인" : "네이버 로그인",
+                sub: hasValidCookies ? "현재 로그인됨" : "웹뷰로 로그인",
+                trailing: .chevron,
+                isLast: !hasValidCookies,
+                action: { showingNaverSync = true }
+            )
+            if hasValidCookies {
+                srow(
+                    icon: "key.slash",
+                    title: "저장된 로그인 삭제",
+                    sub: "쿠키 · 단어장 목록 제거",
+                    trailing: .chevron,
+                    destructive: true,
+                    isLast: true,
+                    action: {
+                        CookieStorage.clear()
+                        WordbookStorage.clear()
+                        hasValidCookies = false
+                        lastSyncDate = nil
+                        wordbookList = WordbookStorage.load()
+                    }
                 )
             }
+        }
+    }
 
-            if hasValidCookies {
-                Button(role: .destructive) {
-                    CookieStorage.clear()
-                    WordbookStorage.clear()
-                    hasValidCookies = false
-                    lastSyncDate = nil
-                    wordbookList = WordbookStorage.load()
-                } label: {
-                    Label("저장된 로그인 삭제", systemImage: "key.slash")
-                }
-            }
+    private var quickSyncSubtitle: String {
+        if !hasValidCookies { return "먼저 네이버 로그인이 필요합니다" }
+        if let date = lastSyncDate {
+            return "마지막: \(date.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return "동기화 기록 없음"
+    }
+
+    private var dataGroup: some View {
+        settingsGroup(title: "데이터") {
+            srow(
+                icon: "number",
+                title: "저장된 단어",
+                sub: "\(allWords.count)개",
+                trailing: .none
+            )
+            srow(
+                icon: "square.and.arrow.down",
+                title: "JSON 파일 불러오기",
+                sub: "파일에서 가져오기",
+                trailing: .chevron,
+                action: { showingImporter = true }
+            )
+            srow(
+                icon: "trash",
+                title: "전체 단어 삭제",
+                sub: "되돌릴 수 없음",
+                trailing: .chevron,
+                destructive: true,
+                isLast: true,
+                action: { showingDeleteAlert = true }
+            )
+        }
+    }
+
+    private var backupGroup: some View {
+        settingsGroup(
+            title: "백업 / 복원",
+            subtitle: "단어 + 즐겨찾기 + 메모 + 통계까지 전부 저장됩니다."
+        ) {
+            srow(
+                icon: "arrow.up.doc",
+                title: "백업 파일 만들기",
+                sub: "공유 시트로 내보내기",
+                trailing: .chevron,
+                action: { backupNow() }
+            )
+            srow(
+                icon: "arrow.down.doc",
+                title: "백업 파일에서 복원",
+                sub: "병합 방식으로 가져오기",
+                trailing: .chevron,
+                isLast: true,
+                action: { showRestoreImporter = true }
+            )
         }
     }
 
     @ViewBuilder
-    private var dataSection: some View {
-        Section("데이터") {
-            LabeledContent("저장된 단어", value: "\(allWords.count)개")
-
-            Button {
-                showingImporter = true
-            } label: {
-                Label("JSON 파일 불러오기", systemImage: "square.and.arrow.down")
-            }
-
-            Button(role: .destructive) {
-                showingDeleteAlert = true
-            } label: {
-                Label("전체 단어 삭제", systemImage: "trash")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var backupSection: some View {
-        Section("백업 / 복원") {
-            Button {
-                backupNow()
-            } label: {
-                Label("백업 파일 만들기", systemImage: "arrow.up.doc")
-            }
-
-            Button {
-                showRestoreImporter = true
-            } label: {
-                Label("백업 파일에서 복원", systemImage: "arrow.down.doc")
-            }
-
-            Text("백업 파일은 단어 + 즐겨찾기 + 메모 + 통계까지 모두 저장합니다.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var resultSection: some View {
+    private var resultGroup: some View {
         if let result = lastResult {
-            Section("최근 불러오기 결과") {
-                LabeledContent("추가됨", value: "\(result.inserted)개")
-                LabeledContent("건너뜀", value: "\(result.skipped)개")
+            settingsGroup(title: "최근 불러오기 결과") {
+                resultRow(label: "추가됨", value: "\(result.inserted)개")
+                resultRow(label: "건너뜀", value: "\(result.skipped)개")
 
-                ForEach(Array(result.skippedCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { reason in
-                    LabeledContent("  └ \(reason.rawValue)", value: "\(result.skippedCounts[reason] ?? 0)개")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                let sortedReasons = Array(result.skippedCounts.keys.sorted { $0.rawValue < $1.rawValue })
+                let hasSkippedItems = !result.skippedItems.isEmpty
+
+                ForEach(Array(sortedReasons.enumerated()), id: \.offset) { idx, reason in
+                    resultRow(
+                        label: "  └ \(reason.rawValue)",
+                        value: "\(result.skippedCounts[reason] ?? 0)개",
+                        muted: true,
+                        isLast: !hasSkippedItems && idx == sortedReasons.count - 1
+                    )
                 }
 
-                if !result.skippedItems.isEmpty {
-                    Button {
-                        showLogSheet = true
-                    } label: {
-                        Label("건너뛴 단어 보기", systemImage: "list.bullet.rectangle")
-                    }
+                if hasSkippedItems {
+                    srow(
+                        icon: "list.bullet.rectangle",
+                        title: "건너뛴 단어 보기",
+                        sub: "\(result.skippedItems.count)개",
+                        trailing: .chevron,
+                        isLast: true,
+                        action: { showLogSheet = true }
+                    )
                 }
             }
         }
     }
 
+    private var infoGroup: some View {
+        settingsGroup(title: "정보") {
+            srow(
+                icon: "info.circle",
+                title: "버전",
+                sub: "1.0",
+                trailing: .none,
+                isLast: true
+            )
+        }
+    }
+
+    // MARK: - Building blocks
+
     @ViewBuilder
-    private var infoSection: some View {
-        Section("정보") {
-            LabeledContent("버전", value: "1.0")
+    private func settingsGroup<Content: View>(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            content()
+        }
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    enum SRowTrailing {
+        case chevron, progress, none
+    }
+
+    @ViewBuilder
+    private func srow(
+        icon: String,
+        title: String,
+        sub: String,
+        trailing: SRowTrailing = .chevron,
+        disabled: Bool = false,
+        destructive: Bool = false,
+        isLast: Bool = false,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        Button {
+            action?()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 13))
+                    .foregroundStyle(destructive ? Theme.wrong : Theme.ink)
+                    .frame(width: 24, height: 24)
+                    .background(destructive ? Theme.wrong.opacity(0.10) : Theme.chipBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(destructive ? Theme.wrong : Theme.ink)
+                    Text(sub)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                switch trailing {
+                case .chevron:
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.line)
+                case .progress:
+                    ProgressView().controlSize(.small)
+                case .none:
+                    EmptyView()
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .opacity(disabled ? 0.4 : 1)
+            .overlay(alignment: .bottom) {
+                if !isLast {
+                    Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled || action == nil)
+    }
+
+    private func resultRow(label: String, value: String, muted: Bool = false, isLast: Bool = false) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: muted ? 11 : 13, weight: muted ? .regular : .medium))
+                .foregroundStyle(muted ? Theme.muted : Theme.ink)
+            Spacer()
+            Text(value)
+                .font(.system(size: muted ? 11 : 13, weight: muted ? .regular : .semibold))
+                .foregroundStyle(muted ? Theme.muted : Theme.ink)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            if !isLast {
+                Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
+            }
+        }
+    }
+
+    // MARK: - Wordbook picker sheet
+
+    private var wordbookPickerSheet: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                HStack {
+                    Button("닫기") { showWordbookPicker = false }
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text("단어장 선택")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text("닫기").font(.system(size: 13)).opacity(0)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(wordbookList.enumerated()), id: \.element.id) { idx, wb in
+                            Button {
+                                selectedWordbookId = wb.id
+                                showWordbookPicker = false
+                            } label: {
+                                HStack {
+                                    Text(wb.name)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Theme.ink)
+                                    Spacer()
+                                    if wb.id == selectedWordbookId {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(Theme.ink)
+                                    }
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                                .overlay(alignment: .bottom) {
+                                    if idx < wordbookList.count - 1 {
+                                        Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .background(Theme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Theme.line, lineWidth: 0.5)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 20)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .background(Theme.surface)
+            .navigationBarHidden(true)
         }
     }
 
@@ -329,7 +617,7 @@ struct SettingsView: View {
             errorMessage = error.localizedDescription
         }
     }
-    
+
     private func backupNow() {
         do {
             backupURL = try BackupService.exportToFile(context: context)
@@ -369,54 +657,142 @@ struct SettingsView: View {
 struct SkippedLogView: View {
     let result: NaverImporter.ImportResult
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    LabeledContent("전체", value: "\(result.skipped)개")
-                    ForEach(Array(result.skippedCounts.keys.sorted { $0.rawValue < $1.rawValue }), id: \.self) { reason in
-                        LabeledContent(reason.rawValue, value: "\(result.skippedCounts[reason] ?? 0)개")
-                    }
-                } header: {
-                    Text("요약")
-                }
-
-                Section {
-                    ForEach(result.skippedItems.indices, id: \.self) { i in
-                        let item = result.skippedItems[i]
-                        HStack {
-                            Text(item.name)
-                                .font(.system(.body, design: .monospaced))
-                            Spacer()
-                            Text(item.reason.rawValue)
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(color(for: item.reason).opacity(0.2))
-                                .foregroundStyle(color(for: item.reason))
-                                .clipShape(Capsule())
-                        }
-                    }
-                } header: {
-                    Text("건너뛴 단어 목록")
-                }
-            }
-            .navigationTitle("건너뛴 단어")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+            VStack(spacing: 0) {
+                HStack {
                     Button("닫기") { dismiss() }
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text("건너뛴 단어")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Spacer()
+                    Text("닫기").font(.system(size: 13)).opacity(0)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // 요약
+                        VStack(spacing: 0) {
+                            Text("요약")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.muted)
+                                .tracking(0.5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.top, 10)
+                                .padding(.bottom, 6)
+
+                            let sortedReasons = Array(result.skippedCounts.keys.sorted { $0.rawValue < $1.rawValue })
+
+                            summaryRow(
+                                label: "전체",
+                                value: "\(result.skipped)개",
+                                bold: true,
+                                isLast: sortedReasons.isEmpty
+                            )
+
+                            ForEach(Array(sortedReasons.enumerated()), id: \.offset) { idx, reason in
+                                summaryRow(
+                                    label: reason.rawValue,
+                                    value: "\(result.skippedCounts[reason] ?? 0)개",
+                                    isLast: idx == sortedReasons.count - 1
+                                )
+                            }
+                        }
+                        .background(Theme.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Theme.line, lineWidth: 0.5)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 14)
+
+                        // 목록
+                        VStack(spacing: 0) {
+                            Text("건너뛴 단어 목록")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.muted)
+                                .tracking(0.5)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.top, 10)
+                                .padding(.bottom, 6)
+
+                            ForEach(result.skippedItems.indices, id: \.self) { i in
+                                let item = result.skippedItems[i]
+                                HStack {
+                                    Text(item.name)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(Theme.ink)
+                                    Spacer()
+                                    Text(item.reason.rawValue)
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(color(for: item.reason))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(color(for: item.reason).opacity(0.12))
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                }
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .overlay(alignment: .bottom) {
+                                    if i < result.skippedItems.count - 1 {
+                                        Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
+                                    }
+                                }
+                            }
+                        }
+                        .background(Theme.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Theme.line, lineWidth: 0.5)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+            .background(Theme.surface)
+            .navigationBarHidden(true)
+        }
+    }
+
+    private func summaryRow(label: String, value: String, bold: Bool = false, isLast: Bool = false) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12, weight: bold ? .semibold : .regular))
+                .foregroundStyle(Theme.ink)
+            Spacer()
+            Text(value)
+                .font(.system(size: 12, weight: bold ? .semibold : .regular))
+                .foregroundStyle(Theme.ink)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .overlay(alignment: .bottom) {
+            if !isLast {
+                Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
             }
         }
     }
 
     private func color(for reason: NaverImporter.SkipReason) -> Color {
         switch reason {
-        case .duplicate:   return .blue
-        case .emptyWord:   return .orange
-        case .parseFailed: return .red
+        case .duplicate:   return Theme.muted
+        case .emptyWord:   return Theme.favorite
+        case .parseFailed: return Theme.wrong
         }
     }
 }

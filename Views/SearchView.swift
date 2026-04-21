@@ -1,16 +1,18 @@
 import SwiftUI
 import SwiftData
 
+// MARK: - SearchView (목업 구조)
+
 struct SearchView: View {
     @Environment(\.modelContext) private var context
     @State private var query: String = ""
+    @FocusState private var queryFocused: Bool
     @State private var scope: SearchScope = .all
     @Query private var allWords: [Word]
 
     @State private var showBulkAlert = false
     @State private var bulkMessage = ""
-    
-    // 검색 기록 (최근 10개)
+
     @State private var history: [String] = SearchHistoryStore.load()
 
     enum SearchScope: String, CaseIterable, Identifiable {
@@ -20,9 +22,9 @@ struct SearchView: View {
         var id: String { rawValue }
     }
 
-    private var hasWildcard: Bool {
-        query.contains("*") || query.contains("?")
-    }
+    // MARK: Search logic
+
+    private var hasWildcard: Bool { query.contains("*") || query.contains("?") }
 
     private func wildcardRegex(from pattern: String) -> NSRegularExpression? {
         var regex = ""
@@ -32,14 +34,10 @@ struct SearchView: View {
             case "?": regex += "."
             case ".", "(", ")", "[", "]", "{", "}", "^", "$", "|", "\\", "+":
                 regex += "\\\(ch)"
-            default:
-                regex += String(ch)
+            default: regex += String(ch)
             }
         }
-        return try? NSRegularExpression(
-            pattern: "^" + regex + "$",
-            options: [.caseInsensitive]
-        )
+        return try? NSRegularExpression(pattern: "^" + regex + "$", options: [.caseInsensitive])
     }
 
     private func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
@@ -47,32 +45,23 @@ struct SearchView: View {
         return regex.firstMatch(in: text, options: [], range: range) != nil
     }
 
-    /// scope에 따라 검색 대상 필드 반환
-    private func searchFields(of word: Word) -> [String] {
+    private func searchFields(of w: Word) -> [String] {
         switch scope {
-        case .all:
-            return [word.english, word.meaning, word.pronunciation, word.example, word.exampleKo]
-        case .word:
-            return [word.english, word.meaning, word.pronunciation]
-        case .example:
-            return [word.example, word.exampleKo]
+        case .all:     return [w.english, w.meaning, w.pronunciation, w.example, w.exampleKo]
+        case .word:    return [w.english, w.meaning, w.pronunciation]
+        case .example: return [w.example, w.exampleKo]
         }
     }
 
     var results: [Word] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
-
         if hasWildcard {
             guard let regex = wildcardRegex(from: q) else { return [] }
-            return allWords.filter { w in
-                searchFields(of: w).contains { matches(regex, $0) }
-            }
+            return allWords.filter { searchFields(of: $0).contains { matches(regex, $0) } }
         } else {
             let lower = q.lowercased()
-            return allWords.filter { w in
-                searchFields(of: w).contains { $0.lowercased().contains(lower) }
-            }
+            return allWords.filter { searchFields(of: $0).contains { $0.lowercased().contains(lower) } }
         }
     }
 
@@ -80,133 +69,25 @@ struct SearchView: View {
         !results.isEmpty && results.allSatisfy(\.isFavorite)
     }
 
+    // MARK: Body
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // 검색 범위 선택
-                Picker("검색 범위", selection: $scope) {
-                    ForEach(SearchScope.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                topBar
+                searchBar.padding(.horizontal, 20).padding(.bottom, 12)
+                segmented.padding(.horizontal, 20).padding(.bottom, 12)
 
-                Group {
-                    if query.isEmpty {
-                        if history.isEmpty {
-                            ContentUnavailableView {
-                                Label("검색", systemImage: "magnifyingglass")
-                            } description: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("한글 또는 영어로 검색할 수 있습니다.")
-                                    Text("와일드카드:")
-                                        .font(.caption.bold())
-                                        .padding(.top, 4)
-                                    Text("• ab* — ab로 시작 (뒤에 1글자 이상)")
-                                    Text("• *ing — ing로 끝 (앞에 1글자 이상)")
-                                    Text("• c*t — c와 t 사이에 1글자 이상")
-                                    Text("• c?t — c+한글자+t (cat, cot, cut)")
-                                }
-                                .font(.caption)
-                                .multilineTextAlignment(.leading)
-                            }
-                        } else {
-                            List {
-                                Section {
-                                    ForEach(history, id: \.self) { term in
-                                        Button {
-                                            query = term
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "clock.arrow.circlepath")
-                                                    .foregroundStyle(.secondary)
-                                                Text(term).foregroundStyle(.primary)
-                                                Spacer()
-                                                Button {
-                                                    removeFromHistory(term)
-                                                } label: {
-                                                    Image(systemName: "xmark")
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                        .padding(6)
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                    }
-                                } header: {
-                                    HStack {
-                                        Text("최근 검색")
-                                        Spacer()
-                                        Button("전체 삭제") { clearHistory() }
-                                            .font(.caption)
-                                            .textCase(nil)
-                                    }
-                                }
-                            }
-                        }
-                    } else if results.isEmpty {
-                        ContentUnavailableView.search(text: query)
-                    } else {
-                        List {
-                            Section {
-                                Button {
-                                    bulkToggleFavorite()
-                                } label: {
-                                    HStack {
-                                        Image(systemName: allFavorited ? "star.slash.fill" : "star.fill")
-                                            .foregroundStyle(.yellow)
-                                        Text(allFavorited
-                                             ? "검색 결과 \(results.count)개 즐겨찾기 해제"
-                                             : "검색 결과 \(results.count)개 모두 즐겨찾기")
-                                        Spacer()
-                                    }
-                                }
-                            }
-
-                            Section {
-                                ForEach(results) { word in
-                                    NavigationLink {
-                                        WordDetailView(word: word)
-                                    } label: {
-                                        WordRow(word: word)
-                                    }
-                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                        Button {
-                                            toggleFavorite(word)
-                                        } label: {
-                                            Label(
-                                                word.isFavorite ? "해제" : "즐겨찾기",
-                                                systemImage: word.isFavorite ? "star.slash.fill" : "star.fill"
-                                            )
-                                        }
-                                        .tint(.yellow)
-                                    }
-                                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                        Button(role: .destructive) {
-                                            delete(word)
-                                        } label: {
-                                            Label("삭제", systemImage: "trash")
-                                        }
-                                    }
-                                }
-                            } header: {
-                                if hasWildcard {
-                                    Text("패턴 검색: \(query) · 범위: \(scope.rawValue)")
-                                } else {
-                                    Text("범위: \(scope.rawValue)")
-                                }
-                            }
-                        }
-                    }
+                if query.isEmpty {
+                    historySection
+                } else if results.isEmpty {
+                    emptyResults
+                } else {
+                    resultsList
                 }
             }
-            .navigationTitle("🔍 검색")
-            .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, prompt: "단어 검색 (*, ? 사용 가능)")
-            .onSubmit(of: .search) {
-                saveToHistory(query)
-            }
+            .background(Theme.surface)
+            .navigationBarHidden(true)
             .alert("완료", isPresented: $showBulkAlert) {
                 Button("확인") {}
             } message: {
@@ -215,34 +96,281 @@ struct SearchView: View {
         }
     }
 
+    // MARK: - Top bar
+
+    private var topBar: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("검색")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .tracking(-0.5)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - Search bar (mockup .searchbar)
+
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.muted)
+
+            TextField("단어 검색 (*, ? 사용 가능)", text: $query)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink)
+                .focused($queryFocused)
+                .submitLabel(.search)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .onSubmit { saveToHistory(query) }
+
+            if hasWildcard {
+                Text(wildcardHint)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+            }
+
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.muted.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(Theme.chipBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var wildcardHint: String {
+        let q = query
+        if q.hasSuffix("*") { return "· \(q.dropLast())로 시작" }
+        if q.hasPrefix("*") { return "· \(q.dropFirst())로 끝남" }
+        if q.contains("?") { return "· ?는 한 글자" }
+        if q.contains("*") { return "· 중간 일치" }
+        return ""
+    }
+
+    // MARK: - Segmented
+
+    private var segmented: some View {
+        HStack(spacing: 2) {
+            ForEach(SearchScope.allCases) { s in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { scope = s }
+                } label: {
+                    Text(s.rawValue)
+                        .font(.system(size: 12, weight: scope == s ? .semibold : .medium))
+                        .foregroundStyle(scope == s ? Theme.ink : Theme.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(scope == s ? Theme.surface : .clear)
+                                .shadow(color: scope == s ? .black.opacity(0.06) : .clear,
+                                        radius: 2, x: 0, y: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Theme.chipBg)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - History (최근 검색 + 힌트)
+
+    @ViewBuilder
+    private var historySection: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if history.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 28, weight: .light))
+                            .foregroundStyle(Theme.muted)
+                        Text("검색어를 입력해보세요")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                        Text("단어, 발음, 예문을 모두 검색할 수 있어요")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                    .padding(.bottom, 8)
+                }
+
+                if !history.isEmpty {
+                    HStack {
+                        Text("최근 검색")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Theme.muted)
+                            .tracking(0.5)
+                        Spacer()
+                        Button("모두 지우기") { clearHistory() }
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .padding(.horizontal, 20)
+
+                    WrappingChips(items: history) { term in
+                        query = term
+                        queryFocused = true
+                    } remove: { term in
+                        removeFromHistory(term)
+                    }
+                    .padding(.horizontal, 20)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("와일드카드")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .tracking(0.5)
+                    hintRow("ab*", "ab로 시작")
+                    hintRow("*ing", "ing로 끝")
+                    hintRow("c*t", "c와 t 사이에 1글자 이상")
+                    hintRow("c?t", "c + 한 글자 + t")
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 6)
+
+                Spacer(minLength: 20)
+            }
+            .padding(.top, 4)
+        }
+        .scrollDismissesKeyboard(.immediately)
+    }
+
+    private func hintRow(_ pattern: String, _ desc: String) -> some View {
+        HStack(spacing: 8) {
+            Text(pattern)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Theme.chipBg)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            Text(desc)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.muted)
+        }
+    }
+
+    // MARK: - Empty results
+
+    private var emptyResults: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.muted)
+            Text("검색 결과가 없습니다")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+            Text("'\(query)'에 해당하는 단어를 찾지 못했어요.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.muted)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Results list
+
+    private var resultsList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("검색 결과 · \(results.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                Spacer()
+                Button {
+                    bulkToggleFavorite()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: allFavorited ? "star.slash" : "star.fill")
+                            .font(.system(size: 10))
+                        Text(allFavorited ? "전체 해제" : "전체 즐겨찾기")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.ink)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 4)
+
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(results.enumerated()), id: \.element.id) { idx, word in
+                        NavigationLink {
+                            WordDetailView(word: word)
+                        } label: {
+                            WordCardRow(
+                                word: word,
+                                showMeaning: true,
+                                isLast: idx == results.count - 1
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button { toggleFavorite(word) } label: {
+                                Label(word.isFavorite ? "즐겨찾기 해제" : "즐겨찾기",
+                                      systemImage: word.isFavorite ? "star.slash" : "star")
+                            }
+                            Button(role: .destructive) { delete(word) } label: {
+                                Label("삭제", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+            }
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.immediately)
+        }
+    }
+
+    // MARK: - Actions
+
     private func toggleFavorite(_ word: Word) {
-        word.isFavorite.toggle()
-        try? context.save()
+        word.isFavorite.toggle(); try? context.save()
     }
 
     private func delete(_ word: Word) {
-        context.delete(word)
-        try? context.save()
+        context.delete(word); try? context.save()
     }
 
     private func bulkToggleFavorite() {
         let targets = results
         let willFavorite = !allFavorited
-        for w in targets {
-            w.isFavorite = willFavorite
-        }
+        for w in targets { w.isFavorite = willFavorite }
         try? context.save()
         bulkMessage = willFavorite
             ? "\(targets.count)개 단어를 즐겨찾기에 추가했어요"
             : "\(targets.count)개 단어의 즐겨찾기를 해제했어요"
         showBulkAlert = true
     }
-    // MARK: - History
+
+    // MARK: - History store
 
     private func saveToHistory(_ term: String) {
-        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        SearchHistoryStore.add(trimmed)
+        let t = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        SearchHistoryStore.add(t)
         history = SearchHistoryStore.load()
     }
 
@@ -254,6 +382,81 @@ struct SearchView: View {
     private func clearHistory() {
         SearchHistoryStore.clear()
         history = []
+    }
+}
+
+// MARK: - Wrapping Chips (최근 검색용)
+
+private struct WrappingChips: View {
+    let items: [String]
+    var onTap: (String) -> Void
+    var remove: (String) -> Void
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                HStack(spacing: 4) {
+                    Button { onTap(item) } label: {
+                        Text(item)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.ink)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { remove(item) } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Theme.chipBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+}
+
+// MARK: - FlowLayout (iOS 16+)
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? 0
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var lineH: CGFloat = 0
+        for sub in subviews {
+            let sz = sub.sizeThatFits(.unspecified)
+            if x + sz.width > maxW {
+                x = 0
+                y += lineH + spacing
+                lineH = 0
+            }
+            x += sz.width + spacing
+            lineH = max(lineH, sz.height)
+        }
+        return CGSize(width: maxW, height: y + lineH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineH: CGFloat = 0
+        for sub in subviews {
+            let sz = sub.sizeThatFits(.unspecified)
+            if x + sz.width > bounds.maxX {
+                x = bounds.minX
+                y += lineH + spacing
+                lineH = 0
+            }
+            sub.place(at: CGPoint(x: x, y: y), proposal: .unspecified)
+            x += sz.width + spacing
+            lineH = max(lineH, sz.height)
+        }
     }
 }
 
@@ -271,9 +474,7 @@ enum SearchHistoryStore {
         var list = load()
         list.removeAll { $0.caseInsensitiveCompare(term) == .orderedSame }
         list.insert(term, at: 0)
-        if list.count > maxCount {
-            list = Array(list.prefix(maxCount))
-        }
+        if list.count > maxCount { list = Array(list.prefix(maxCount)) }
         UserDefaults.standard.set(list, forKey: key)
     }
 
