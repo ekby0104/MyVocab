@@ -69,8 +69,27 @@ struct MatchingGameView: View {
         }
     }
 
+    // 캐싱: 시작 화면에서 반복 필터링 방지
+    private var sourceCounts: [SourceType: Int] {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let now = Date()
+        return [
+            .all: base.count,
+            .favorites: base.filter(\.isFavorite).count,
+            .wrongOnly: base.filter(\.isWrong).count,
+            .dueToday: base.filter { w in
+                if let next = w.nextReviewDate { return next <= now }
+                return true
+            }.count
+        ]
+    }
+
     private var isCleared: Bool {
         matchedPairs.count == totalPairs && !isTimeUp
+    }
+
+    private var unmatchedWords: [Word] {
+        gameWords.filter { !matchedPairs.contains($0.id) }
     }
 
     // MARK: - Body
@@ -141,13 +160,16 @@ struct MatchingGameView: View {
         .padding(.bottom, 12)
     }
 
+    private var enoughWords: Bool {
+        (sourceCounts[selectedSource] ?? 0) >= totalPairs
+    }
+
     private var startScreen: some View {
         VStack(spacing: 0) {
             startTopBar
 
             ScrollView {
                 VStack(spacing: 0) {
-                    // 타이틀 영역
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(totalPairs)쌍 · \(Int(timeLimit))초")
                             .font(.system(size: 10, weight: .medium))
@@ -173,12 +195,10 @@ struct MatchingGameView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
 
-                    // 단어 출처
                     sourceSection
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
 
-                    // 시작 버튼
                     Button { startGame() } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "play.fill")
@@ -198,7 +218,7 @@ struct MatchingGameView: View {
                     .padding(.bottom, 8)
 
                     if !enoughWords {
-                        Text("\(totalPairs)개 이상 필요합니다 (현재 \(wordsForSource(selectedSource).count)개)")
+                        Text("\(totalPairs)개 이상 필요합니다 (현재 \(sourceCounts[selectedSource] ?? 0)개)")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.wrong)
                             .padding(.horizontal, 20)
@@ -211,10 +231,6 @@ struct MatchingGameView: View {
         }
     }
 
-    private var enoughWords: Bool {
-        wordsForSource(selectedSource).count >= totalPairs
-    }
-
     private var sourceSection: some View {
         VStack(spacing: 8) {
             ForEach(SourceType.allCases) { source in
@@ -224,7 +240,7 @@ struct MatchingGameView: View {
     }
 
     private func sourceRow(_ source: SourceType) -> some View {
-        let count = wordsForSource(source).count
+        let count = sourceCounts[source] ?? 0
         let isSelected = selectedSource == source
 
         return Button {
@@ -237,159 +253,93 @@ struct MatchingGameView: View {
                     .frame(width: 24, height: 24)
                     .background(Theme.chipBg)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+
                 Text(source.rawValue)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.ink)
+
                 Spacer()
+
                 Text("\(count)")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
                     .foregroundStyle(Theme.muted)
-                Image(systemName: isSelected ? "checkmark" : "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
                     .foregroundStyle(isSelected ? Theme.ink : Theme.line)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Theme.surface)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(isSelected ? Theme.chipBg : Theme.surface)
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Theme.ink : Theme.line,
-                            lineWidth: isSelected ? 1.2 : 0.5)
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? Theme.ink : Theme.line, lineWidth: isSelected ? 1.2 : 0.5)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .opacity(count < totalPairs ? 0.45 : 1)
         }
         .buttonStyle(.plain)
         .disabled(count < totalPairs)
-        .opacity(count < totalPairs ? 0.45 : 1)
     }
 
-    // MARK: - Game screen
-
-    private var gameTopBar: some View {
-        HStack(spacing: 8) {
-            Button { showGiveUpAlert = true } label: {
-                iconChip("xmark")
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Text("매칭 · \(matchedPairs.count) / \(totalPairs)")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.ink)
-
-            Spacer()
-
-            Button {
-                withAnimation { cards.shuffle() }
-            } label: {
-                iconChip("shuffle")
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
-    }
+    // MARK: - Game Screen
 
     private var gameScreen: some View {
-        VStack(spacing: 0) {
-            gameTopBar
-
-            // quiz-top: 남은 시간 + 매칭 카운트
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: "timer")
-                        .font(.system(size: 11))
-                    Text(String(format: "남은 시간 %.1fs", timeRemaining))
-                        .monospacedDigit()
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Button { showGiveUpAlert = true } label: {
+                    iconChip("xmark")
                 }
-                .font(.system(size: 12, weight: .medium))
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    Image(systemName: "timer")
+                        .font(.system(size: 12))
+                    Text(String(format: "%.1f", max(0, timeRemaining)))
+                        .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                }
                 .foregroundStyle(timeRemaining <= 5 ? Theme.wrong : Theme.ink)
 
                 Spacer()
 
-                Text("매칭 \(correctCount)")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.correct)
+                Text("\(matchedPairs.count)/\(totalPairs)")
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 6)
+            .padding(.top, 8)
 
-            // timer-bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    Rectangle().fill(Theme.chipBg)
-                    Rectangle()
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Theme.chipBg)
+                    RoundedRectangle(cornerRadius: 3)
                         .fill(timeRemaining <= 5 ? Theme.wrong : Theme.ink)
                         .frame(width: geo.size.width * max(0, timeRemaining / timeLimit))
                         .animation(.linear(duration: 0.1), value: timeRemaining)
                 }
             }
-            .frame(height: 3)
-            .clipShape(RoundedRectangle(cornerRadius: 2))
+            .frame(height: 4)
             .padding(.horizontal, 20)
-            .padding(.bottom, 14)
 
-            // 4×4 그리드 — 화면을 가득 채우는 균일한 카드
-            GeometryReader { geo in
-                let cols: CGFloat = 4
-                let rows: CGFloat = 4
-                let spacing: CGFloat = 6
-                let cellW = (geo.size.width  - spacing * (cols - 1)) / cols
-                let cellH = (geo.size.height - spacing * (rows - 1)) / rows
-
-                LazyVGrid(columns: Array(
-                    repeating: GridItem(.fixed(cellW), spacing: spacing),
-                    count: Int(cols)
-                ), spacing: spacing) {
-                    ForEach(cards) { card in
-                        cardButton(card, width: cellW, height: cellH)
-                    }
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ], spacing: 8) {
+                ForEach(cards) { card in
+                    cardButton(card)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 14)
-
-            // bottom controls: 포기 / 계속 풀기 (오답 리셋)
-            HStack(spacing: 8) {
-                Button { showGiveUpAlert = true } label: {
-                    Text("포기")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Theme.surface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Theme.line, lineWidth: 1)
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-
-                Button {
-                    firstSelected = nil
-                    wrongFlash = []
-                } label: {
-                    Text("계속 풀기")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(.systemBackground))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Theme.ink)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
+            .padding(.horizontal, 12)
         }
     }
 
     @ViewBuilder
-    private func cardButton(_ card: MatchCard, width: CGFloat, height: CGFloat) -> some View {
+    private func cardButton(_ card: MatchCard) -> some View {
         let isMatched = matchedPairs.contains(card.wordId)
         let isSelected = firstSelected == card.id
         let isWrongFlash = wrongFlash.contains(card.id)
@@ -400,99 +350,47 @@ struct MatchingGameView: View {
             selectCard(card)
         } label: {
             Text(card.text)
-                .font(card.isEnglish
-                      ? .system(size: 13, weight: .semibold)
-                      : .system(size: 11))
-                .foregroundStyle(cardForeground(isMatched: isMatched, isSelected: isSelected, isCorrectFlash: isCorrectFlash, isWrongFlash: isWrongFlash))
+                .font(card.isEnglish ? .system(size: 13, weight: .bold) : .system(size: 12))
                 .minimumScaleFactor(0.5)
-                .lineLimit(3)
+                .lineLimit(6)
                 .multilineTextAlignment(.center)
-                .padding(4)
-                .frame(width: width, height: height)
-                .background(cardBackground(
+                .frame(maxWidth: .infinity, minHeight: 110)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
+                .background(cardColor(
                     isMatched: isMatched,
-                    isSelected: isSelected,
                     isCorrectFlash: isCorrectFlash,
-                    isWrongFlash: isWrongFlash
-                ))
-                .overlay(cardBorderOverlay(
-                    isMatched: isMatched,
+                    isWrongFlash: isWrongFlash,
                     isSelected: isSelected,
-                    isCorrectFlash: isCorrectFlash,
-                    isWrongFlash: isWrongFlash
+                    isEnglish: card.isEnglish
                 ))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            isSelected ? Theme.ink :
+                            isMatched ? Theme.correct.opacity(0.5) :
+                            Color.clear,
+                            lineWidth: 2
+                        )
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 10))
+                .opacity(isMatched ? 0.5 : 1.0)
         }
         .buttonStyle(.plain)
         .disabled(isMatched || isProcessing)
     }
 
-    private func cardBackground(
-        isMatched: Bool,
-        isSelected: Bool,
-        isCorrectFlash: Bool,
-        isWrongFlash: Bool
-    ) -> Color {
-        if isCorrectFlash { return Theme.correct.opacity(0.16) }
-        if isWrongFlash   { return Theme.wrong.opacity(0.14) }
-        if isMatched      { return Theme.chipBg }
-        if isSelected     { return Theme.ink }
-        return Theme.surface
-    }
-
-    private func cardForeground(
-        isMatched: Bool,
-        isSelected: Bool,
-        isCorrectFlash: Bool,
-        isWrongFlash: Bool
-    ) -> Color {
-        if isSelected   { return Color(.systemBackground) }
-        if isMatched    { return Theme.muted }
-        if isWrongFlash { return Theme.wrong }
-        if isCorrectFlash { return Theme.correct }
-        return Theme.ink
-    }
-
-    @ViewBuilder
-    private func cardBorderOverlay(
-        isMatched: Bool,
-        isSelected: Bool,
-        isCorrectFlash: Bool,
-        isWrongFlash: Bool
-    ) -> some View {
-        if isMatched {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                .foregroundStyle(Theme.line)
-        } else if isCorrectFlash {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Theme.correct, lineWidth: 1)
-        } else if isWrongFlash {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Theme.wrong, lineWidth: 1)
-        } else if isSelected {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Theme.ink, lineWidth: 1)
-        } else {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Theme.line, lineWidth: 0.5)
-        }
-    }
-
-    // MARK: - Result screen
-
-    private var unmatchedWords: [Word] {
-        gameWords.filter { !matchedPairs.contains($0.id) }
-    }
+    // MARK: - Result Screen
 
     private func resultScreen(success: Bool) -> some View {
         VStack(spacing: 0) {
-            // Top bar
-            HStack(spacing: 8) {
-                Button { dismiss() } label: { iconChip("chevron.left") }
-                    .buttonStyle(.plain)
+            HStack {
+                Button { dismiss() } label: {
+                    iconChip("xmark")
+                }
+                .buttonStyle(.plain)
                 Spacer()
-                Text("결과")
+                Text(success ? "클리어!" : "시간 초과")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.ink)
                 Spacer()
@@ -504,40 +402,26 @@ struct MatchingGameView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    // 결과 헤더
-                    VStack(spacing: 8) {
-                        Image(systemName: success ? "checkmark.seal.fill" : "clock.badge.xmark")
-                            .font(.system(size: 44, weight: .regular))
-                            .foregroundStyle(success ? Theme.correct : Theme.wrong)
-                            .padding(.top, 8)
+                    Image(systemName: success ? "trophy.fill" : "clock.badge.xmark.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(success ? Theme.favorite : Theme.wrong)
+                        .padding(.top, 20)
+                        .padding(.bottom, 12)
 
-                        Text(success ? "클리어" : "시간 초과")
-                            .font(.system(size: 22, weight: .bold))
+                    if success {
+                        Text(String(format: "%.1f초", timeLimit - timeRemaining))
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundStyle(Theme.ink)
-                            .tracking(-0.3)
-
-                        if success {
-                            Text(String(format: "%.1f초 만에 완료", timeLimit - timeRemaining))
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.muted)
-                        } else {
-                            Text("다시 도전해보세요.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.muted)
-                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.bottom, 18)
 
-                    // 통계 (정답/오답/매칭률)
                     HStack(spacing: 0) {
-                        statCol(title: "매칭", value: "\(correctCount)", color: Theme.correct)
-                        Rectangle().fill(Theme.line).frame(width: 0.5, height: 34)
+                        statCol(title: "정답", value: "\(correctCount)", color: Theme.correct)
+                        Rectangle().fill(Theme.line).frame(width: 0.5, height: 32)
                         statCol(title: "오답", value: "\(wrongCount)", color: Theme.wrong)
-                        Rectangle().fill(Theme.line).frame(width: 0.5, height: 34)
-                        statCol(title: "진행", value: "\(matchedPairs.count)/\(totalPairs)", color: Theme.ink)
+                        Rectangle().fill(Theme.line).frame(width: 0.5, height: 32)
+                        statCol(title: "매칭", value: "\(matchedPairs.count)/\(totalPairs)", color: Theme.ink)
                     }
-                    .padding(.vertical, 14)
+                    .padding(.vertical, 12)
                     .background(Theme.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
@@ -545,16 +429,15 @@ struct MatchingGameView: View {
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 20)
+                    .padding(.top, 16)
                     .padding(.bottom, 18)
 
-                    // 못 맞춘 단어
                     if !unmatchedWords.isEmpty {
                         unmatchedCard
                             .padding(.horizontal, 20)
                             .padding(.bottom, 18)
                     }
 
-                    // 액션 버튼
                     VStack(spacing: 8) {
                         Button { startGame() } label: {
                             HStack(spacing: 6) {
@@ -710,7 +593,6 @@ struct MatchingGameView: View {
 
             if let word = gameWords.first(where: { $0.id == firstCard.wordId }) {
                 SRSService.correct(word)
-                try? context.save()
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -722,6 +604,7 @@ struct MatchingGameView: View {
                 isProcessing = false
 
                 if matchedPairs.count == totalPairs {
+                    try? context.save()
                     stopTimer()
                 }
             }
@@ -729,11 +612,9 @@ struct MatchingGameView: View {
             wrongCount += 1
             wrongFlash = [firstCard.id, secondCard.id]
 
-            // 영어 카드 쪽 단어만 오답 처리
             let englishCard = firstCard.isEnglish ? firstCard : secondCard
             if let word = gameWords.first(where: { $0.id == englishCard.wordId }) {
                 SRSService.wrong(word)
-                try? context.save()
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
@@ -771,6 +652,20 @@ struct MatchingGameView: View {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    private func cardColor(
+        isMatched: Bool,
+        isCorrectFlash: Bool,
+        isWrongFlash: Bool,
+        isSelected: Bool,
+        isEnglish: Bool
+    ) -> Color {
+        if isMatched { return Theme.correct.opacity(0.15) }
+        if isCorrectFlash { return Theme.correct.opacity(0.4) }
+        if isWrongFlash { return Theme.wrong.opacity(0.4) }
+        if isSelected { return Theme.link.opacity(0.3) }
+        return isEnglish ? Theme.link.opacity(0.08) : Theme.favorite.opacity(0.08)
     }
 }
 

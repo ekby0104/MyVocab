@@ -72,6 +72,21 @@ struct QuizView: View {
         }
     }
 
+    // 캐싱: 시작 화면에서 반복 필터링 방지
+    private var sourceCounts: [SourceType: Int] {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let now = Date()
+        return [
+            .all: base.count,
+            .favorites: base.filter(\.isFavorite).count,
+            .wrongOnly: base.filter(\.isWrong).count,
+            .dueToday: base.filter { w in
+                if let next = w.nextReviewDate { return next <= now }
+                return true
+            }.count
+        ]
+    }
+
     private var sourcePool: [Word] { wordsForSource(selectedSource) }
     private var effectiveCount: Int { min(quizCount, sourcePool.count) }
 
@@ -198,7 +213,7 @@ struct QuizView: View {
     }
 
     private func sourceRow(_ s: SourceType) -> some View {
-        let count = wordsForSource(s).count
+        let count = sourceCounts[s] ?? 0
         return Button {
             selectedSource = s
         } label: {
@@ -545,7 +560,7 @@ struct QuizView: View {
             selectedId = word.id
             wrongCount += 1
             SRSService.wrong(word)
-            try? context.save()
+            // save는 퀴즈 끝날 때 한 번만
         }
     }
 
@@ -583,11 +598,12 @@ struct QuizView: View {
             wrongCount += 1
             SRSService.wrong(correct)
         }
-        try? context.save()
+        // save는 퀴즈 끝날 때 한 번만
     }
 
     private func advance() {
         if index + 1 >= quizDeck.count {
+            try? context.save()   // 퀴즈 끝날 때 한 번만 저장
             quizDeck = []
         } else {
             index += 1
