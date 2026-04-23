@@ -30,8 +30,8 @@ struct SearchView: View {
         var regex = ""
         for ch in pattern {
             switch ch {
-            case "*": regex += ".+"
-            case "?": regex += "."
+            case "*": regex += ".*"  // 0개 이상
+            case "?": regex += "."   // 정확히 1개
             case ".", "(", ")", "[", "]", "{", "}", "^", "$", "|", "\\", "+":
                 regex += "\\\(ch)"
             default: regex += String(ch)
@@ -239,7 +239,7 @@ struct SearchView: View {
                         .tracking(0.5)
                     hintRow("ab*", "ab로 시작")
                     hintRow("*ing", "ing로 끝")
-                    hintRow("c*t", "c와 t 사이에 1글자 이상")
+                    hintRow("c*t", "c와 t 사이에 0글자 이상")
                     hintRow("c?t", "c + 한 글자 + t")
                 }
                 .padding(.horizontal, 20)
@@ -321,7 +321,8 @@ struct SearchView: View {
                             WordCardRow(
                                 word: word,
                                 showMeaning: true,
-                                isLast: idx == results.count - 1
+                                isLast: idx == results.count - 1,
+                                onToggleFavorite: { toggleFavorite(word) }
                             )
                         }
                         .buttonStyle(.plain)

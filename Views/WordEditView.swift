@@ -231,7 +231,7 @@ struct WordEditView: View {
         editGroup(title: "메모", required: false) {
             field {
                 TextField("개인 메모", text: $memo, axis: .vertical)
-                    .lineLimit(2...4)
+                    .lineLimit(15...30)
                     .font(.system(size: 12))
             }
         }

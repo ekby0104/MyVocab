@@ -38,6 +38,9 @@ struct GameView: View {
 
     private var canReview: Bool { dueCount > 0 }
 
+    private var hasAnyWrongCount: Bool { allWords.contains { $0.wrongCount > 0 } }
+    private var hasAnyLearning: Bool { allWords.contains { $0.correctCount > 0 || $0.wrongCount > 0 } }
+
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
@@ -247,7 +250,7 @@ struct GameView: View {
             adminRow(icon: "minus.circle",
                      title: "오답 기록 전체 초기화",
                      sub: "오답 카운트 0으로",
-                     disabled: allWords.allSatisfy { $0.wrongCount == 0 }) {
+                     disabled: !hasAnyWrongCount) {
                 showResetWrongAlert = true
             }
 
@@ -256,7 +259,7 @@ struct GameView: View {
             adminRow(icon: "arrow.counterclockwise",
                      title: "학습 기록 전체 초기화",
                      sub: "정답·오답·SRS 모두 리셋",
-                     disabled: allWords.allSatisfy { $0.correctCount == 0 && $0.wrongCount == 0 }) {
+                     disabled: !hasAnyLearning) {
                 showResetAllAlert = true
             }
         }

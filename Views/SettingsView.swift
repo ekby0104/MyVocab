@@ -36,6 +36,9 @@ struct SettingsView: View {
         wordbookList.first { $0.id == selectedWordbookId } ?? .all
     }
 
+    private var favoriteCount: Int { allWords.filter(\.isFavorite).count }
+    private var masteredCount: Int { allWords.filter { $0.srsLevel >= 5 }.count }
+
     // MARK: - Body
 
     var body: some View {
@@ -179,9 +182,9 @@ struct SettingsView: View {
             HStack(spacing: 0) {
                 ribbonItem(value: "\(allWords.count)", label: "단어")
                 Rectangle().fill(Theme.line).frame(width: 0.5, height: 28)
-                ribbonItem(value: "\(allWords.filter(\.isFavorite).count)", label: "즐겨찾기")
+                ribbonItem(value: "\(favoriteCount)", label: "즐겨찾기")
                 Rectangle().fill(Theme.line).frame(width: 0.5, height: 28)
-                ribbonItem(value: "\(allWords.filter { $0.srsLevel >= 5 }.count)", label: "마스터")
+                ribbonItem(value: "\(masteredCount)", label: "마스터")
             }
             .padding(.vertical, 10)
             .background(Theme.chipBg)

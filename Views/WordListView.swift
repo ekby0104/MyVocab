@@ -26,6 +26,10 @@ struct WordListView: View {
     @State private var sortOrder: SortOrder = .newest
     @State private var showAdd = false
 
+    // 캐시된 정렬/필터 결과 — body 당 1회만 계산
+    @State private var cachedList: [Word] = []
+    @State private var cachedCount: Int = 0
+
     // 뜻 보이기/숨기기
     @AppStorage("wordList.showMeaning") private var showMeaning: Bool = true
 
@@ -52,32 +56,33 @@ struct WordListView: View {
 
     // MARK: Derived
 
-    private var filtered: [Word] {
+    private func rebuildList() {
         let base: [Word]
         switch filter {
         case .all:      base = words
         case .favorite: base = words.filter(\.isFavorite)
         case .wrong:    base = words.filter { $0.isWrong || $0.wrongCount > 0 }
         }
-        return sort(base)
+        cachedList = sortWords(base)
+        cachedCount = cachedList.count
     }
 
-    private func sort(_ list: [Word]) -> [Word] {
+    private func sortWords(_ list: [Word]) -> [Word] {
         var list = list
         switch sortOrder {
         case .newest:       list.sort { $0.createdAt > $1.createdAt }
-        case .alphabet:     list.sort { $0.english.lowercased() < $1.english.lowercased() }
-        case .alphabetDesc: list.sort { $0.english.lowercased() > $1.english.lowercased() }
+        case .alphabet:     list.sort { $0.english.localizedCaseInsensitiveCompare($1.english) == .orderedAscending }
+        case .alphabetDesc: list.sort { $0.english.localizedCaseInsensitiveCompare($1.english) == .orderedDescending }
         case .favorite:
             list.sort { lhs, rhs in
                 if lhs.isFavorite != rhs.isFavorite { return lhs.isFavorite && !rhs.isFavorite }
-                return lhs.english.lowercased() < rhs.english.lowercased()
+                return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
             }
         case .wrong:
             list.sort { lhs, rhs in
                 if lhs.isWrong != rhs.isWrong { return lhs.isWrong && !rhs.isWrong }
                 if lhs.wrongCount != rhs.wrongCount { return lhs.wrongCount > rhs.wrongCount }
-                return lhs.english.lowercased() < rhs.english.lowercased()
+                return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
             }
         case .random: list.shuffle()
         }
@@ -98,19 +103,19 @@ struct WordListView: View {
                     .padding(.bottom, 10)
 
                 // 리스트
-                if filtered.isEmpty {
+                if cachedList.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, word in
+                            ForEach(cachedList) { word in
                                 NavigationLink {
                                     WordDetailView(word: word)
                                 } label: {
                                     WordCardRow(
                                         word: word,
                                         showMeaning: showMeaning,
-                                        isLast: idx == filtered.count - 1,
+                                        isLast: word.id == cachedList.last?.id,
                                         onToggleFavorite: { toggleFavorite(word) }
                                     )
                                 }
@@ -143,6 +148,10 @@ struct WordListView: View {
             .sheet(isPresented: $showAdd) {
                 WordEditView(mode: .add)
             }
+            .onAppear { rebuildList() }
+            .onChange(of: words)      { rebuildList() }
+            .onChange(of: filter)     { rebuildList() }
+            .onChange(of: sortOrder)  { rebuildList() }
         }
     }
 
@@ -154,7 +163,7 @@ struct WordListView: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(Theme.ink)
                 .tracking(-0.5)
-            Text("\(filtered.count)")
+            Text("\(cachedCount)")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.muted)
 

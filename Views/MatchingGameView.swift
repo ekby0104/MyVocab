@@ -324,6 +324,8 @@ struct MatchingGameView: View {
             .frame(height: 4)
             .padding(.horizontal, 20)
 
+            Spacer()
+
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 8),
                 GridItem(.flexible(), spacing: 8),
@@ -335,6 +337,25 @@ struct MatchingGameView: View {
                 }
             }
             .padding(.horizontal, 12)
+
+            Spacer()
+
+            Button { giveUpGame() } label: {
+                Text("포기")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.wrong)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Theme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Theme.wrong.opacity(0.35), lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
         }
     }
 
@@ -652,6 +673,12 @@ struct MatchingGameView: View {
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
+    }
+
+    private func giveUpGame() {
+        stopTimer()
+        markUnmatchedAsWrong()
+        isTimeUp = true
     }
 
     private func cardColor(

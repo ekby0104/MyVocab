@@ -429,6 +429,7 @@ struct LevelWordsView: View {
     let level: Int
     let allWords: [Word]
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var context
 
     private var words: [Word] {
         allWords.filter { $0.srsLevel == level }
@@ -475,7 +476,10 @@ struct LevelWordsView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(words.enumerated()), id: \.element.id) { idx, word in
                             NavigationLink { WordDetailView(word: word) } label: {
-                                WordCardRow(word: word, showMeaning: true, isLast: idx == words.count - 1)
+                                WordCardRow(word: word, showMeaning: true, isLast: idx == words.count - 1, onToggleFavorite: {
+                                    word.isFavorite.toggle()
+                                    try? context.save()
+                                })
                             }
                             .buttonStyle(.plain)
                         }
