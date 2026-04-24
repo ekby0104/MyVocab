@@ -92,6 +92,10 @@ struct MatchingGameView: View {
         gameWords.filter { !matchedPairs.contains($0.id) }
     }
 
+    private var matchedWords: [Word] {
+        gameWords.filter { matchedPairs.contains($0.id) }
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -459,6 +463,12 @@ struct MatchingGameView: View {
                             .padding(.bottom, 18)
                     }
 
+                    if !matchedWords.isEmpty {
+                        matchedCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 18)
+                    }
+
                     VStack(spacing: 8) {
                         Button { startGame() } label: {
                             HStack(spacing: 6) {
@@ -543,6 +553,51 @@ struct MatchingGameView: View {
                 }
                 .buttonStyle(.plain)
                 if idx < unmatchedWords.count - 1 {
+                    Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
+                }
+            }
+        }
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var matchedCard: some View {
+        VStack(spacing: 0) {
+            Text("맞춘 단어")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Theme.muted)
+                .tracking(0.5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+
+            ForEach(Array(matchedWords.enumerated()), id: \.element.id) { idx, word in
+                Button { selectedWord = word } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(word.english)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.ink)
+                            Text(word.meaning)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.muted)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.line)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+                if idx < matchedWords.count - 1 {
                     Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
                 }
             }

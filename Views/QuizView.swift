@@ -162,7 +162,7 @@ struct QuizView: View {
                         .font(.system(size: 36, weight: .light))
                         .foregroundStyle(Theme.ink)
                         .padding(.top, 12)
-                    Text("4지선다 퀴즈")
+                    Text("6지선다 퀴즈")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                     Text("5초 안에 답하지 않으면 오답")
@@ -195,13 +195,13 @@ struct QuizView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
-                    .disabled(sourcePool.count < 4)
-                    .opacity(sourcePool.count < 4 ? 0.4 : 1)
+                    .disabled(sourcePool.count < 6)
+                    .opacity(sourcePool.count < 6 ? 0.4 : 1)
                 }
                 .padding(.horizontal, 20)
 
-                if sourcePool.count < 4 {
-                    Text("단어가 4개 이상 필요합니다")
+                if sourcePool.count < 6 {
+                    Text("단어가 6개 이상 필요합니다")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.wrong)
                 }
@@ -245,8 +245,8 @@ struct QuizView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(count < 4)
-        .opacity(count < 4 ? 0.45 : 1)
+        .disabled(count < 6)
+        .opacity(count < 6 ? 0.45 : 1)
     }
 
     private var modeSegmented: some View {
@@ -581,7 +581,7 @@ struct QuizView: View {
     private func rollOptions() {
         guard let word = current else { return }
         let pool = allWords.filter { $0.id != word.id && !$0.english.isEmpty && !$0.meaning.isEmpty }
-        var distractors = Array(pool.shuffled().prefix(3))
+        var distractors = Array(pool.shuffled().prefix(5))
         distractors.append(word)
         distractors.shuffle()
         options = distractors

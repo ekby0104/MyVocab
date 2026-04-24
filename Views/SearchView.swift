@@ -5,6 +5,7 @@ import SwiftData
 
 struct SearchView: View {
     @Environment(\.modelContext) private var context
+    @Binding var resetTrigger: Bool
     @State private var query: String = ""
     @FocusState private var queryFocused: Bool
     @State private var scope: SearchScope = .all
@@ -88,6 +89,11 @@ struct SearchView: View {
             }
             .background(Theme.surface)
             .navigationBarHidden(true)
+            .onChange(of: resetTrigger) {
+                query = ""
+                scope = .all
+                queryFocused = false
+            }
             .alert("완료", isPresented: $showBulkAlert) {
                 Button("확인") {}
             } message: {
