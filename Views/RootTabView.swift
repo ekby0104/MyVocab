@@ -10,7 +10,9 @@ struct RootTabView: View {
     @State private var gamePath = NavigationPath()
     /// 단어리스트 필터(.all/.favorite/.wrong). 전체·즐겨찾기 루트탭과 동기화됨.
     @State private var wordFilter: WordListFilter = .all
+    @State private var wordListPath = NavigationPath()
     @State private var searchResetTrigger: Bool = false
+    @State private var searchPath = NavigationPath()
 
     /// 한 번이라도 열린 탭을 기록 — 최초 열린 순간에만 뷰를 생성하고
     /// 이후에는 opacity 로 숨기되, 아직 한 번도 열리지 않은 탭은 생성 자체를 하지 않는다.
@@ -58,7 +60,7 @@ struct RootTabView: View {
         VStack(spacing: 0) {
             ZStack {
                 // 단어 리스트: 항상 생성됨 (기본 탭)
-                WordListView(filter: $wordFilter) { f in
+                WordListView(filter: $wordFilter, wordListPath: $wordListPath) { f in
                     withAnimation(.easeOut(duration: 0.12)) {
                         selected = (f == .favorite) ? .favorite : .all
                     }
@@ -67,7 +69,7 @@ struct RootTabView: View {
                 .allowsHitTesting(isWordTab)
 
                 // 나머지 탭: 최초 선택 시에만 생성, 이후 opacity로 관리
-                lazyTab(.search) { SearchView(resetTrigger: $searchResetTrigger) }
+                lazyTab(.search) { SearchView(resetTrigger: $searchResetTrigger, searchPath: $searchPath) }
                 lazyTab(.game)   { GameView(path: $gamePath) }
                 lazyTab(.settings) { SettingsView() }
             }
@@ -123,11 +125,23 @@ struct RootTabView: View {
             if tab == .game && selected == .game {
                 gamePath = NavigationPath()
             }
-            // 검색 탭을 이미 활성인 상태에서 다시 누르면 검색 초기화
+            // 검색 탭을 이미 활성인 상태에서 다시 누르면:
+            // 1) 하위 화면이 있으면 pop-to-root
+            // 2) 이미 root이면 검색어 초기화
             if tab == .search && selected == .search {
-                searchResetTrigger.toggle()
+                if !searchPath.isEmpty {
+                    searchPath = NavigationPath()
+                } else {
+                    searchResetTrigger.toggle()
+                }
             }
             // 전체/즐겨찾기 루트탭 탭 → 단어리스트 필터도 함께 전환 (세그먼트와 양방향 동기화).
+            // 이미 단어 탭이 활성인 상태에서 다시 누를 때만 pop-to-root
+            if (tab == .all || tab == .favorite) && isWordTab {
+                if !wordListPath.isEmpty {
+                    wordListPath = NavigationPath()
+                }
+            }
             withAnimation(.easeInOut(duration: 0.15)) {
                 if tab == .all {
                     wordFilter = .all

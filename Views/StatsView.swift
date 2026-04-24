@@ -9,48 +9,52 @@ struct StatsView: View {
     @Query private var allWords: [Word]
     @State private var selectedLevel: Int? = nil
 
-    private var totalWords: Int { allWords.count }
-    private var favoriteCount: Int { allWords.filter(\.isFavorite).count }
-    private var wrongWordsCount: Int { allWords.filter(\.isWrong).count }
+    // 캐시된 통계
+    @State private var totalWords: Int = 0
+    @State private var favoriteCount: Int = 0
+    @State private var wrongWordsCount: Int = 0
+    @State private var totalCorrect: Int = 0
+    @State private var totalWrong: Int = 0
+    @State private var totalAttempts: Int = 0
+    @State private var accuracyPercent: Int = 0
+    @State private var studiedCount: Int = 0
+    @State private var masteredCount: Int = 0
+    @State private var topWrongWords: [Word] = []
+    @State private var levelDistribution: [(level: Int, count: Int)] = []
+    @State private var maxLevelCount: Int = 1
 
-    private var totalCorrect: Int { allWords.reduce(0) { $0 + $1.correctCount } }
-    private var totalWrong: Int { allWords.reduce(0) { $0 + $1.wrongCount } }
-    private var totalAttempts: Int { totalCorrect + totalWrong }
+    private func rebuildStats() {
+        totalWords = allWords.count
+        favoriteCount = allWords.filter(\.isFavorite).count
+        wrongWordsCount = allWords.filter(\.isWrong).count
 
-    private var accuracyPercent: Int {
-        guard totalAttempts > 0 else { return 0 }
-        return Int(Double(totalCorrect) / Double(totalAttempts) * 100)
-    }
+        var correct = 0, wrong = 0, studied = 0, mastered = 0
+        for w in allWords {
+            correct += w.correctCount
+            wrong += w.wrongCount
+            if w.lastReviewedAt != nil { studied += 1 }
+            if w.srsLevel >= 5 { mastered += 1 }
+        }
+        totalCorrect = correct
+        totalWrong = wrong
+        totalAttempts = correct + wrong
+        accuracyPercent = totalAttempts > 0 ? Int(Double(correct) / Double(totalAttempts) * 100) : 0
+        studiedCount = studied
+        masteredCount = mastered
 
-    private var studiedCount: Int {
-        allWords.filter { $0.lastReviewedAt != nil }.count
-    }
+        topWrongWords = Array(
+            allWords
+                .filter { $0.wrongCount > 0 }
+                .sorted { $0.wrongCount > $1.wrongCount }
+                .prefix(10)
+        )
 
-    private var masteredCount: Int {
-        allWords.filter { $0.srsLevel >= 5 }.count
-    }
-
-    /// 가장 자주 틀리는 단어 TOP 10
-    private var topWrongWords: [Word] {
-        allWords
-            .filter { $0.wrongCount > 0 }
-            .sorted { $0.wrongCount > $1.wrongCount }
-            .prefix(10)
-            .map { $0 }
-    }
-
-    /// SRS 레벨 분포
-    private var levelDistribution: [(level: Int, count: Int)] {
         let dist = SRSService.levelDistribution(from: allWords)
-        return (0...SRSService.maxLevel).map { level in
+        levelDistribution = (0...SRSService.maxLevel).map { level in
             (level: level, count: dist[level] ?? 0)
         }
+        maxLevelCount = max(1, levelDistribution.map(\.count).max() ?? 1)
     }
-
-    private var maxLevelCount: Int {
-        max(levelDistribution.map(\.count).max() ?? 1, 1)
-    }
-
     // MARK: - Body
 
     var body: some View {
@@ -90,6 +94,7 @@ struct StatsView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
+        .onAppear { rebuildStats() }
         .sheet(item: $selectedLevel) { level in
             LevelWordsView(level: level, allWords: allWords)
         }

@@ -83,7 +83,9 @@ struct WordDetailView: View {
                             .foregroundStyle(Theme.ink)
                             .lineLimit(2...)
                             .focused($memoFocused)
-                            .onChange(of: word.memo) { _, _ in try? context.save() }
+                            .onChange(of: memoFocused) { _, focused in
+                                if !focused { try? context.save() }
+                            }
                             .padding(10)
                             .background(Theme.chipBg)
                             .clipShape(RoundedRectangle(cornerRadius: 8))

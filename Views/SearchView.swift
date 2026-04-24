@@ -6,6 +6,7 @@ import SwiftData
 struct SearchView: View {
     @Environment(\.modelContext) private var context
     @Binding var resetTrigger: Bool
+    @Binding var searchPath: NavigationPath
     @State private var query: String = ""
     @FocusState private var queryFocused: Bool
     @State private var scope: SearchScope = .all
@@ -15,6 +16,11 @@ struct SearchView: View {
     @State private var bulkMessage = ""
 
     @State private var history: [String] = SearchHistoryStore.load()
+
+    // 캐시된 검색 결과
+    @State private var cachedResults: [Word] = []
+    @State private var searchTask: Task<Void, Never>?
+    @State private var hasAppeared = false
 
     enum SearchScope: String, CaseIterable, Identifiable {
         case all = "전체"
@@ -54,26 +60,35 @@ struct SearchView: View {
         }
     }
 
-    var results: [Word] {
+    private func performSearch() {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return [] }
-        if hasWildcard {
-            guard let regex = wildcardRegex(from: q) else { return [] }
-            return allWords.filter { searchFields(of: $0).contains { matches(regex, $0) } }
+        guard !q.isEmpty else { cachedResults = []; return }
+        if q.contains("*") || q.contains("?") {
+            guard let regex = wildcardRegex(from: q) else { cachedResults = []; return }
+            cachedResults = allWords.filter { searchFields(of: $0).contains { matches(regex, $0) } }
         } else {
             let lower = q.lowercased()
-            return allWords.filter { searchFields(of: $0).contains { $0.lowercased().contains(lower) } }
+            cachedResults = allWords.filter { searchFields(of: $0).contains { $0.lowercased().contains(lower) } }
+        }
+    }
+
+    private func scheduleSearch() {
+        searchTask?.cancel()
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            performSearch()
         }
     }
 
     private var allFavorited: Bool {
-        !results.isEmpty && results.allSatisfy(\.isFavorite)
+        !cachedResults.isEmpty && cachedResults.allSatisfy(\.isFavorite)
     }
 
     // MARK: Body
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $searchPath) {
             VStack(spacing: 0) {
                 topBar
                 searchBar.padding(.horizontal, 20).padding(.bottom, 12)
@@ -81,7 +96,7 @@ struct SearchView: View {
 
                 if query.isEmpty {
                     historySection
-                } else if results.isEmpty {
+                } else if cachedResults.isEmpty {
                     emptyResults
                 } else {
                     resultsList
@@ -89,10 +104,26 @@ struct SearchView: View {
             }
             .background(Theme.surface)
             .navigationBarHidden(true)
+            .navigationDestination(for: PersistentIdentifier.self) { id in
+                if let word = allWords.first(where: { $0.persistentModelID == id }) {
+                    WordDetailView(word: word)
+                }
+            }
             .onChange(of: resetTrigger) {
                 query = ""
                 scope = .all
                 queryFocused = false
+                cachedResults = []
+            }
+            .onChange(of: query) { scheduleSearch() }
+            .onChange(of: scope) { performSearch() }
+            .onAppear {
+                if !hasAppeared {
+                    hasAppeared = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        queryFocused = true
+                    }
+                }
             }
             .alert("완료", isPresented: $showBulkAlert) {
                 Button("확인") {}
@@ -297,7 +328,7 @@ struct SearchView: View {
     private var resultsList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("검색 결과 · \(results.count)")
+                Text("검색 결과 · \(cachedResults.count)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                     .tracking(0.5)
@@ -320,14 +351,12 @@ struct SearchView: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(results.enumerated()), id: \.element.id) { idx, word in
-                        NavigationLink {
-                            WordDetailView(word: word)
-                        } label: {
+                    ForEach(Array(cachedResults.enumerated()), id: \.element.id) { idx, word in
+                        NavigationLink(value: word.persistentModelID) {
                             WordCardRow(
                                 word: word,
                                 showMeaning: true,
-                                isLast: idx == results.count - 1,
+                                isLast: idx == cachedResults.count - 1,
                                 onToggleFavorite: { toggleFavorite(word) }
                             )
                         }
@@ -362,10 +391,11 @@ struct SearchView: View {
     }
 
     private func bulkToggleFavorite() {
-        let targets = results
+        let targets = cachedResults
         let willFavorite = !allFavorited
         for w in targets { w.isFavorite = willFavorite }
         try? context.save()
+        performSearch()
         bulkMessage = willFavorite
             ? "\(targets.count)개 단어를 즐겨찾기에 추가했어요"
             : "\(targets.count)개 단어의 즐겨찾기를 해제했어요"

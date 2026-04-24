@@ -21,25 +21,29 @@ struct GameView: View {
     @State private var showResetWrongAlert = false
     @State private var showResetAllAlert = false
 
+    // 캐시된 값
+    @State private var cachedDueCount: Int = 0
+    @State private var cachedWrongWords: [Word] = []
+    @State private var cachedHasAnyWrongCount: Bool = false
+    @State private var cachedHasAnyLearning: Bool = false
+
     init(path: Binding<NavigationPath>) {
         self._path = path
     }
 
-    private var wrongWords: [Word] { allWords.filter(\.isWrong) }
+    private var canReview: Bool { cachedDueCount > 0 }
 
-    private var dueCount: Int {
+    private func rebuildGameStats() {
         let now = Date()
-        return allWords.filter { w in
+        cachedDueCount = allWords.filter { w in
             guard !w.english.isEmpty, !w.meaning.isEmpty else { return false }
             if let next = w.nextReviewDate { return next <= now }
             return true
         }.count
+        cachedWrongWords = allWords.filter(\.isWrong)
+        cachedHasAnyWrongCount = allWords.contains { $0.wrongCount > 0 }
+        cachedHasAnyLearning = allWords.contains { $0.correctCount > 0 || $0.wrongCount > 0 }
     }
-
-    private var canReview: Bool { dueCount > 0 }
-
-    private var hasAnyWrongCount: Bool { allWords.contains { $0.wrongCount > 0 } }
-    private var hasAnyLearning: Bool { allWords.contains { $0.correctCount > 0 || $0.wrongCount > 0 } }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -65,6 +69,7 @@ struct GameView: View {
             }
             .background(Theme.surface)
             .navigationBarHidden(true)
+            .onAppear { rebuildGameStats() }
             .navigationDestination(for: GameDestination.self) { dest in
                 switch dest {
                 case .quiz:      QuizView()
@@ -77,7 +82,7 @@ struct GameView: View {
                 Button("취소", role: .cancel) {}
                 Button("해제", role: .destructive) { clearAllWrong() }
             } message: {
-                Text("틀린 단어 \(wrongWords.count)개의 틀린 상태가 해제됩니다.\n오답 횟수는 유지됩니다.")
+                Text("틀린 단어 \(cachedWrongWords.count)개의 틀린 상태가 해제됩니다.\n오답 횟수는 유지됩니다.")
             }
             .alert("오답 기록 전체 초기화", isPresented: $showResetWrongAlert) {
                 Button("취소", role: .cancel) {}
@@ -134,7 +139,7 @@ struct GameView: View {
                 .foregroundStyle(Color.white.opacity(0.85))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
 
-            Text(canReview ? "\(dueCount)단어 복습 준비됨" : "훌륭해요!")
+            Text(canReview ? "\(cachedDueCount)단어 복습 준비됨" : "훌륭해요!")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.white)
                 .tracking(-0.2)
@@ -240,8 +245,8 @@ struct GameView: View {
 
             adminRow(icon: "xmark.circle",
                      title: "틀린 단어 전체 해제",
-                     sub: wrongWords.isEmpty ? "틀린 단어 없음" : "\(wrongWords.count)개 해제",
-                     disabled: wrongWords.isEmpty) {
+                     sub: cachedWrongWords.isEmpty ? "틀린 단어 없음" : "\(cachedWrongWords.count)개 해제",
+                     disabled: cachedWrongWords.isEmpty) {
                 showClearAlert = true
             }
 
@@ -250,7 +255,7 @@ struct GameView: View {
             adminRow(icon: "minus.circle",
                      title: "오답 기록 전체 초기화",
                      sub: "오답 카운트 0으로",
-                     disabled: !hasAnyWrongCount) {
+                     disabled: !cachedHasAnyWrongCount) {
                 showResetWrongAlert = true
             }
 
@@ -259,7 +264,7 @@ struct GameView: View {
             adminRow(icon: "arrow.counterclockwise",
                      title: "학습 기록 전체 초기화",
                      sub: "정답·오답·SRS 모두 리셋",
-                     disabled: !hasAnyLearning) {
+                     disabled: !cachedHasAnyLearning) {
                 showResetAllAlert = true
             }
         }
@@ -308,13 +313,15 @@ struct GameView: View {
     // MARK: - Actions
 
     private func clearAllWrong() {
-        for w in wrongWords { w.isWrong = false }
+        for w in cachedWrongWords { w.isWrong = false }
         try? context.save()
+        rebuildGameStats()
     }
 
     private func resetAllWrongCounts() {
         for w in allWords where w.wrongCount > 0 { w.wrongCount = 0 }
         try? context.save()
+        rebuildGameStats()
     }
 
     private func resetAllLearning() {
@@ -327,5 +334,6 @@ struct GameView: View {
             w.lastReviewedAt = nil
         }
         try? context.save()
+        rebuildGameStats()
     }
 }

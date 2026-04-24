@@ -15,6 +15,7 @@ enum WordListFilter: String, CaseIterable, Identifiable {
 struct WordListView: View {
     /// 현재 필터(전체/즐겨찾기/틀린 단어). 부모(RootTabView)와 공유.
     @Binding var filter: WordListFilter
+    @Binding var wordListPath: NavigationPath
 
     /// 세그먼트에서 .all 또는 .favorite 이 선택됐을 때 부모가 루트탭을 동기화할 수 있도록
     /// 호출되는 콜백. .wrong 은 호출되지 않음.
@@ -92,7 +93,7 @@ struct WordListView: View {
     // MARK: Body
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $wordListPath) {
             VStack(spacing: 0) {
                 // 상단: 타이틀 + 아이콘 버튼 (목업 .topbar)
                 topBar
@@ -109,9 +110,7 @@ struct WordListView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(cachedList) { word in
-                                NavigationLink {
-                                    WordDetailView(word: word)
-                                } label: {
+                                NavigationLink(value: word.persistentModelID) {
                                     WordCardRow(
                                         word: word,
                                         showMeaning: showMeaning,
@@ -145,13 +144,18 @@ struct WordListView: View {
             }
             .background(Theme.surface)
             .navigationBarHidden(true)
+            .navigationDestination(for: PersistentIdentifier.self) { id in
+                if let word = words.first(where: { $0.persistentModelID == id }) {
+                    WordDetailView(word: word)
+                }
+            }
             .sheet(isPresented: $showAdd) {
                 WordEditView(mode: .add)
             }
             .onAppear { rebuildList() }
-            .onChange(of: words)      { rebuildList() }
-            .onChange(of: filter)     { rebuildList() }
-            .onChange(of: sortOrder)  { rebuildList() }
+            .onChange(of: words.count) { rebuildList() }
+            .onChange(of: filter)      { rebuildList() }
+            .onChange(of: sortOrder)   { rebuildList() }
         }
     }
 
@@ -282,11 +286,13 @@ struct WordListView: View {
     private func toggleFavorite(_ word: Word) {
         word.isFavorite.toggle()
         try? context.save()
+        if filter == .favorite { rebuildList() }
     }
 
     private func delete(_ word: Word) {
         context.delete(word)
         try? context.save()
+        rebuildList()
     }
 }
 
