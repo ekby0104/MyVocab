@@ -7,6 +7,8 @@ import Combine
 struct QuizView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+    @Environment(\.verticalSizeClass) private var vSizeClass
     @Query private var allWords: [Word]
 
     @State private var selectedSource: SourceType = .all
@@ -324,6 +326,9 @@ struct QuizView: View {
 
     // MARK: - Quiz running
 
+    /// 가로 모드(landscape)인지 판별
+    private var isLandscape: Bool { vSizeClass == .compact }
+
     @ViewBuilder
     private func quizContent(word: Word) -> some View {
         VStack(spacing: 12) {
@@ -351,102 +356,198 @@ struct QuizView: View {
             .frame(height: 3)
             .padding(.horizontal, 20)
 
-            // quiz-q card
-            ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(Theme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.line, lineWidth: 0.5))
-
-                VStack(spacing: 4) {
-                    Text(mode == .enToKo ? "ENGLISH → KOREAN" : "KOREAN → ENGLISH")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .tracking(1.2)
-                    Text(questionText(for: word))
-                        .font(.system(size: mode == .koToEn ? 22 : 26, weight: .bold))
-                        .foregroundStyle(Theme.ink)
-                        .tracking(-0.3)
-                        .multilineTextAlignment(.center)
-                        .minimumScaleFactor(0.6)
-                    if mode == .enToKo, !word.pronunciation.isEmpty {
-                        Text(word.pronunciation)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(.horizontal, 22)
-                .frame(maxWidth: .infinity)
-
-                if mode == .enToKo {
-                    Button { SpeechService.shared.speak(word.english) } label: {
-                        Image(systemName: "speaker.wave.2")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.ink)
-                            .frame(width: 28, height: 28)
-                            .background(Theme.chipBg)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(12)
-                }
+            if isLandscape {
+                landscapeQuizBody(word: word)
+            } else {
+                portraitQuizBody(word: word)
             }
-            .frame(minHeight: 160)
-            .padding(.horizontal, 20)
-
-            // options
-            VStack(spacing: 8) {
-                ForEach(Array(options.enumerated()), id: \.element.id) { idx, option in
-                    Button {
-                        guard selectedId == nil else { return }
-                        answer(selected: option, correct: word)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("\(idx + 1)")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(numberFg(for: option, correct: word))
-                                .frame(width: 22, height: 22)
-                                .background(numberBg(for: option, correct: word))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                            Text(answerText(for: option))
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                                .multilineTextAlignment(.leading)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-                        .background(optionBg(for: option, correct: word))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(optionBorder(for: option, correct: word), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 20)
-
-            if selectedId != nil {
-                Button { advance() } label: {
-                    Text("다음 문제")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(.systemBackground))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Theme.ink)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 20)
-            }
-
-            Spacer(minLength: 8)
         }
         .padding(.top, 4)
         .onAppear { startTimer() }
         .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
             tick()
         }
+    }
+
+    /// 세로 모드 — 기존 레이아웃 (전체 ScrollView)
+    @ViewBuilder
+    private func portraitQuizBody(word: Word) -> some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                questionCard(word: word)
+                    .frame(minHeight: 160)
+                    .padding(.horizontal, 20)
+
+                optionsList(word: word, columns: 1)
+                    .padding(.horizontal, 20)
+
+                nextButton
+                    .padding(.horizontal, 20)
+
+                Spacer(minLength: 8)
+            }
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    /// 가로 모드 — 좌(문제) + 우(2열 3행 옵션)
+    @ViewBuilder
+    private func landscapeQuizBody(word: Word) -> some View {
+        GeometryReader { geo in
+            // 카드 최소 너비 280, 화면이 넓으면 35%까지 확장
+            let cardWidth = max(280, min(geo.size.width * 0.35, 420))
+
+            HStack(alignment: .top, spacing: 12) {
+                // 왼쪽: 문제 카드 (고정 폭, 다음 버튼 높이만큼 빼기)
+                questionCard(word: word)
+                    .frame(width: cardWidth, height: geo.size.height - 56)
+
+                // 오른쪽: 옵션 + 다음 버튼
+                VStack(spacing: 8) {
+                    landscapeOptionsGrid(word: word)
+                        .frame(maxHeight: .infinity)
+
+                    nextButton
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    /// 가로 모드 옵션 그리드 - 2열 3행, 모든 셀 동일 크기
+    @ViewBuilder
+    private func landscapeOptionsGrid(word: Word) -> some View {
+        GeometryReader { geo in
+            let spacing: CGFloat = 8
+            let columns = 2
+            let rows = 3
+            let cellWidth = (geo.size.width - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+            let cellHeight = (geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(cellWidth), spacing: spacing), count: columns),
+                spacing: spacing
+            ) {
+                ForEach(Array(options.enumerated()), id: \.element.id) { idx, option in
+                    optionButton(idx: idx, option: option, word: word)
+                        .frame(width: cellWidth, height: cellHeight)
+                }
+            }
+        }
+    }
+
+    /// 문제 카드
+    @ViewBuilder
+    private func questionCard(word: Word) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14).fill(Theme.surface)
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.line, lineWidth: 0.5))
+
+            VStack(spacing: 4) {
+                Text(mode == .enToKo ? "ENGLISH → KOREAN" : "KOREAN → ENGLISH")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(1.2)
+                Text(questionText(for: word))
+                    .font(.system(size: mode == .koToEn ? 22 : 26, weight: .bold))
+                    .foregroundStyle(Theme.ink)
+                    .tracking(-0.3)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.6)
+                if mode == .enToKo, !word.pronunciation.isEmpty {
+                    Text(word.pronunciation)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.horizontal, 22)
+            .frame(maxWidth: .infinity)
+
+            if mode == .enToKo {
+                Button { SpeechService.shared.speak(word.english) } label: {
+                    Image(systemName: "speaker.wave.2")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 28, height: 28)
+                        .background(Theme.chipBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(12)
+            }
+        }
+    }
+
+    /// 옵션 리스트 (1열 또는 2열)
+    @ViewBuilder
+    private func optionsList(word: Word, columns: Int) -> some View {
+        if columns == 1 {
+            VStack(spacing: 8) {
+                ForEach(Array(options.enumerated()), id: \.element.id) { idx, option in
+                    optionButton(idx: idx, option: option, word: word)
+                }
+            }
+        } else {
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: columns),
+                spacing: 8
+            ) {
+                ForEach(Array(options.enumerated()), id: \.element.id) { idx, option in
+                    optionButton(idx: idx, option: option, word: word)
+                }
+            }
+        }
+    }
+
+    /// 개별 옵션 버튼
+    @ViewBuilder
+    private func optionButton(idx: Int, option: Word, word: Word) -> some View {
+        Button {
+            guard selectedId == nil else { return }
+            answer(selected: option, correct: word)
+        } label: {
+            HStack(spacing: 10) {
+                Text("\(idx + 1)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(numberFg(for: option, correct: word))
+                    .frame(width: 22, height: 22)
+                    .background(numberBg(for: option, correct: word))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                Text(answerText(for: option))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .background(optionBg(for: option, correct: word))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(optionBorder(for: option, correct: word), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 다음 문제 버튼 (답 미선택 시 "건너뛰기"로 동작)
+    private var nextButton: some View {
+        Button { advance() } label: {
+            Text(selectedId == nil ? "건너뛰기" : "다음 문제")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(selectedId == nil ? Theme.muted : Color(.systemBackground))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(selectedId == nil ? Theme.chipBg : Theme.ink)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
     }
 
     private func questionText(for word: Word) -> String {
@@ -602,6 +703,13 @@ struct QuizView: View {
     }
 
     private func advance() {
+        // 답을 선택하지 않은 상태에서 버튼을 눌렀다면 오답 처리
+        if selectedId == nil, let word = current {
+            selectedId = word.id
+            wrongCount += 1
+            SRSService.wrong(word)
+        }
+
         if index + 1 >= quizDeck.count {
             try? context.save()   // 퀴즈 끝날 때 한 번만 저장
             quizDeck = []

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct RootTabView: View {
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.verticalSizeClass) private var vSizeClass
     @State private var importMessage: String? = nil
     @State private var showImportAlert = false
     @State private var selected: Tab = .all
@@ -56,6 +57,9 @@ struct RootTabView: View {
     /// 단어 리스트 탭이 활성인지
     private var isWordTab: Bool { selected == .all || selected == .favorite }
 
+    /// 가로 모드 여부
+    private var isLandscape: Bool { vSizeClass == .compact }
+
     var body: some View {
         VStack(spacing: 0) {
             ZStack {
@@ -86,8 +90,8 @@ struct RootTabView: View {
                     tabItem(tab)
                 }
             }
-            .padding(.top, 6)
-            .padding(.bottom, 4)
+            .padding(.top, isLandscape ? 2 : 6)
+            .padding(.bottom, isLandscape ? 2 : 4)
             .background(Theme.surface)
         }
         .background(Theme.surface)
@@ -155,15 +159,17 @@ struct RootTabView: View {
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: isActive ? tab.iconFilled : tab.icon)
-                    .font(.system(size: 16, weight: isActive ? .semibold : .regular))
+                    .font(.system(size: isLandscape ? 14 : 16, weight: isActive ? .semibold : .regular))
                     .foregroundStyle(isActive ? Theme.ink : Theme.muted)
-                    .frame(height: 20)
-                Text(tab.label)
-                    .font(.system(size: 10, weight: isActive ? .semibold : .medium))
-                    .foregroundStyle(isActive ? Theme.ink : Theme.muted)
+                    .frame(height: isLandscape ? 16 : 20)
+                if !isLandscape {
+                    Text(tab.label)
+                        .font(.system(size: 10, weight: isActive ? .semibold : .medium))
+                        .foregroundStyle(isActive ? Theme.ink : Theme.muted)
+                }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 4)
+            .padding(.vertical, isLandscape ? 2 : 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

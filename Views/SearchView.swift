@@ -501,7 +501,7 @@ private struct FlowLayout: Layout {
 
 enum SearchHistoryStore {
     private static let key = "searchHistory.v1"
-    private static let maxCount = 10
+    private static let maxCount = 20
 
     static func load() -> [String] {
         UserDefaults.standard.stringArray(forKey: key) ?? []

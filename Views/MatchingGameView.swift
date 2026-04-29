@@ -7,6 +7,7 @@ struct MatchingGameView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.verticalSizeClass) private var vSizeClass
     @Query private var allWords: [Word]
 
     // 시작 화면 선택
@@ -31,11 +32,16 @@ struct MatchingGameView: View {
     @State private var wrongCount = 0
     @State private var gameWords: [Word] = []
     @State private var selectedWord: Word? = nil
+    /// 게임 중 매칭 실패한 단어 ID들 (중복 오답 처리 방지)
+    @State private var wrongWordIds: Set<String> = []
+    /// 게임 중 첫 시도에 매칭 성공한 단어 ID들 (정답으로 처리할 단어)
+    @State private var correctWordIds: Set<String> = []
 
     @State private var showGiveUpAlert = false
 
     private let totalPairs = 8
-    private let timeLimit: TimeInterval = 30.0
+    @AppStorage("matchingGame.timeLimit") private var timeLimitSeconds: Int = 30
+    private var timeLimit: TimeInterval { TimeInterval(timeLimitSeconds) }
 
     enum SourceType: String, CaseIterable, Identifiable {
         case all       = "전체 단어"
@@ -88,12 +94,14 @@ struct MatchingGameView: View {
         matchedPairs.count == totalPairs && !isTimeUp
     }
 
+    /// 못 맞춘 단어 = 정답 처리되지 않은 모든 단어 (매칭 실패 + 매칭 못한 단어)
     private var unmatchedWords: [Word] {
-        gameWords.filter { !matchedPairs.contains($0.id) }
+        gameWords.filter { !correctWordIds.contains($0.id) }
     }
 
+    /// 맞춘 단어 = 첫 시도에 매칭 성공한 단어
     private var matchedWords: [Word] {
-        gameWords.filter { matchedPairs.contains($0.id) }
+        gameWords.filter { correctWordIds.contains($0.id) }
     }
 
     // MARK: - Body
@@ -203,6 +211,10 @@ struct MatchingGameView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
 
+                    timeSection
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 18)
+
                     Button { startGame() } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "play.fill")
@@ -241,6 +253,60 @@ struct MatchingGameView: View {
                 sourceRow(source)
             }
         }
+    }
+
+    /// 10초 단위로 10초 ~ 120초 (2분)
+    private static let timeOptions: [Int] = stride(from: 10, through: 120, by: 10).map { $0 }
+
+    private var timeSection: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "timer")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 24, height: 24)
+                .background(Theme.chipBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            Text("제한 시간")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.ink)
+
+            Spacer()
+
+            Menu {
+                Picker("제한 시간", selection: $timeLimitSeconds) {
+                    ForEach(Self.timeOptions, id: \.self) { sec in
+                        Text(timeLabel(sec)).tag(sec)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(timeLabel(timeLimitSeconds))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Theme.chipBg)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func timeLabel(_ sec: Int) -> String {
+        if sec < 60 { return "\(sec)초" }
+        if sec % 60 == 0 { return "\(sec / 60)분" }
+        return "\(sec / 60)분 \(sec % 60)초"
     }
 
     private func sourceRow(_ source: SourceType) -> some View {
@@ -288,6 +354,12 @@ struct MatchingGameView: View {
 
     // MARK: - Game Screen
 
+    /// 가로 모드 여부
+    private var isLandscape: Bool { vSizeClass == .compact }
+
+    /// 그리드 컬럼 수 (가로: 8, 세로: 4)
+    private var gridColumns: Int { isLandscape ? 8 : 4 }
+
     private var gameScreen: some View {
         VStack(spacing: 12) {
             HStack(spacing: 8) {
@@ -328,43 +400,59 @@ struct MatchingGameView: View {
             .frame(height: 4)
             .padding(.horizontal, 20)
 
-            Spacer()
+            // 카드 그리드 - 사용 가능한 공간 안에서 동적 사이즈
+            GeometryReader { geo in
+                let columns = gridColumns
+                let rows = Int(ceil(Double(cards.count) / Double(columns)))
+                let spacing: CGFloat = 5
+                let cardWidth = floor((geo.size.width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+                let cardHeight = floor((geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows))
 
-            LazyVGrid(columns: [
-                GridItem(.flexible(), spacing: 8),
-                GridItem(.flexible(), spacing: 8),
-                GridItem(.flexible(), spacing: 8),
-                GridItem(.flexible(), spacing: 8)
-            ], spacing: 8) {
-                ForEach(cards) { card in
-                    cardButton(card)
+                VStack(spacing: spacing) {
+                    ForEach(0..<rows, id: \.self) { row in
+                        HStack(spacing: spacing) {
+                            ForEach(0..<columns, id: \.self) { col in
+                                let idx = row * columns + col
+                                if idx < cards.count {
+                                    cardButton(cards[idx], width: cardWidth, height: cardHeight)
+                                } else {
+                                    Color.clear.frame(width: cardWidth, height: cardHeight)
+                                }
+                            }
+                        }
+                    }
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .center)
             }
-            .padding(.horizontal, 12)
-
-            Spacer()
-
-            Button { giveUpGame() } label: {
-                Text("포기")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.wrong)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Theme.surface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Theme.wrong.opacity(0.35), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-            .buttonStyle(.plain)
             .padding(.horizontal, 20)
-            .padding(.bottom, 12)
+            .padding(.bottom, isLandscape ? 12 : 0)
+            .layoutPriority(1)
+
+            // 포기 버튼 - 가로 모드에서는 숨김 (탭바 X 버튼으로 대체)
+            if !isLandscape {
+                Button { giveUpGame() } label: {
+                    Text("포기")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.wrong)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Theme.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Theme.wrong.opacity(0.35), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+                .layoutPriority(2)
+            }
         }
     }
 
     @ViewBuilder
-    private func cardButton(_ card: MatchCard) -> some View {
+    private func cardButton(_ card: MatchCard, width: CGFloat, height: CGFloat) -> some View {
         let isMatched = matchedPairs.contains(card.wordId)
         let isSelected = firstSelected == card.id
         let isWrongFlash = wrongFlash.contains(card.id)
@@ -379,9 +467,9 @@ struct MatchingGameView: View {
                 .minimumScaleFactor(0.5)
                 .lineLimit(6)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 110)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 6)
+                .frame(width: width, height: height)
                 .background(cardColor(
                     isMatched: isMatched,
                     isCorrectFlash: isCorrectFlash,
@@ -629,6 +717,8 @@ struct MatchingGameView: View {
         correctFlash = []
         correctCount = 0
         wrongCount = 0
+        wrongWordIds = []
+        correctWordIds = []
         isTimeUp = false
         isProcessing = false
         timeRemaining = timeLimit
@@ -664,12 +754,12 @@ struct MatchingGameView: View {
         isProcessing = true
 
         if firstCard.wordId == secondCard.wordId {
-            correctCount += 1
-            correctFlash = [firstCard.id, secondCard.id]
-
-            if let word = gameWords.first(where: { $0.id == firstCard.wordId }) {
-                SRSService.correct(word)
+            // 게임 중 한 번도 틀리지 않은 경우에만 정답으로 카운트
+            if !wrongWordIds.contains(firstCard.wordId) {
+                correctCount += 1
+                correctWordIds.insert(firstCard.wordId)
             }
+            correctFlash = [firstCard.id, secondCard.id]
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 withAnimation {
@@ -680,18 +770,20 @@ struct MatchingGameView: View {
                 isProcessing = false
 
                 if matchedPairs.count == totalPairs {
-                    try? context.save()
                     stopTimer()
+                    finalizeGame()
                 }
             }
         } else {
-            wrongCount += 1
             wrongFlash = [firstCard.id, secondCard.id]
 
+            // 매칭 실패한 단어 추적 (실제 SRSService 처리는 게임 종료 시점에)
             let englishCard = firstCard.isEnglish ? firstCard : secondCard
-            if let word = gameWords.first(where: { $0.id == englishCard.wordId }) {
-                SRSService.wrong(word)
+            // 같은 단어를 여러 번 틀려도 오답 카운트는 1회만
+            if !wrongWordIds.contains(englishCard.wordId) {
+                wrongCount += 1
             }
+            wrongWordIds.insert(englishCard.wordId)
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 withAnimation { wrongFlash = [] }
@@ -710,17 +802,25 @@ struct MatchingGameView: View {
                 timeRemaining -= 0.1
             } else {
                 timeRemaining = 0
-                markUnmatchedAsWrong()
                 isTimeUp = true
                 stopTimer()
+                finalizeGame()
             }
         }
     }
 
-    private func markUnmatchedAsWrong() {
-        for word in gameWords where !matchedPairs.contains(word.id) {
-            SRSService.wrong(word)
-            wrongCount += 1
+    /// 게임 종료 시 일괄 SRS 처리 (전체 성공/시간 초과/포기 모든 경우)
+    private func finalizeGame() {
+        for word in gameWords {
+            if correctWordIds.contains(word.id) {
+                SRSService.correct(word)
+            } else {
+                // 매칭 실패 + 매칭 못한 단어 모두 오답
+                if !wrongWordIds.contains(word.id) {
+                    wrongCount += 1
+                }
+                SRSService.wrong(word)
+            }
         }
         try? context.save()
     }
@@ -732,8 +832,8 @@ struct MatchingGameView: View {
 
     private func giveUpGame() {
         stopTimer()
-        markUnmatchedAsWrong()
         isTimeUp = true
+        finalizeGame()
     }
 
     private func cardColor(
