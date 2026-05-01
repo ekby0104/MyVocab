@@ -22,18 +22,29 @@ struct StatsView: View {
     @State private var topWrongWords: [Word] = []
     @State private var levelDistribution: [(level: Int, count: Int)] = []
     @State private var maxLevelCount: Int = 1
+    @State private var dueCount: Int = 0
 
     private func rebuildStats() {
         totalWords = allWords.count
         favoriteCount = allWords.filter(\.isFavorite).count
         wrongWordsCount = allWords.filter(\.isWrong).count
 
-        var correct = 0, wrong = 0, studied = 0, mastered = 0
+        let now = Date()
+        var correct = 0, wrong = 0, studied = 0, mastered = 0, due = 0
         for w in allWords {
             correct += w.correctCount
             wrong += w.wrongCount
             if w.lastReviewedAt != nil { studied += 1 }
             if w.srsLevel >= 5 { mastered += 1 }
+
+            // 오늘 학습할 단어: 빈 단어 제외 + 복습 예정일 도래
+            if !w.english.isEmpty, !w.meaning.isEmpty {
+                if let next = w.nextReviewDate {
+                    if next <= now { due += 1 }
+                } else {
+                    due += 1   // 미학습 단어
+                }
+            }
         }
         totalCorrect = correct
         totalWrong = wrong
@@ -41,6 +52,7 @@ struct StatsView: View {
         accuracyPercent = totalAttempts > 0 ? Int(Double(correct) / Double(totalAttempts) * 100) : 0
         studiedCount = studied
         masteredCount = mastered
+        dueCount = due
 
         topWrongWords = Array(
             allWords
@@ -63,6 +75,10 @@ struct StatsView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
+                    todayCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+
                     donutCard
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
@@ -132,6 +148,46 @@ struct StatsView: View {
         .padding(.bottom, 12)
     }
 
+    // MARK: - Today's review card (오늘 학습할 단어)
+
+    private var todayCard: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.ink)
+                    .frame(width: 44, height: 44)
+                Image(systemName: "calendar")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.white)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("오늘의 학습")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(dueCount)")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.ink)
+                        .tracking(-0.3)
+                    Text(dueCount > 0 ? "단어 복습 가능" : "복습할 단어 없음")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
     // MARK: - Donut card
 
     private var donutCard: some View {
@@ -157,6 +213,7 @@ struct StatsView: View {
 
             // Right column
             VStack(alignment: .leading, spacing: 8) {
+                metricRow(label: "총 단어", value: "\(totalWords)")
                 metricRow(label: "학습 완료", value: "\(studiedCount)")
                 metricRow(label: "마스터", value: "\(masteredCount)")
                 metricRow(label: "즐겨찾기", value: "\(favoriteCount)")

@@ -103,9 +103,16 @@ struct WordListView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 10)
 
-                // 리스트
+                // 리스트 — words에 데이터가 있는데 캐시가 비어있는 초기 상태에서는
+                // emptyState 대신 캐시 재계산을 트리거하기 위한 보호 처리
                 if cachedList.isEmpty {
-                    emptyState
+                    if words.isEmpty {
+                        emptyState
+                    } else {
+                        // @Query가 비동기로 채워졌으나 cachedList가 아직 빈 케이스 — 즉시 재계산
+                        Color.clear
+                            .onAppear { rebuildList() }
+                    }
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
@@ -156,6 +163,13 @@ struct WordListView: View {
             .onChange(of: words.count) { rebuildList() }
             .onChange(of: filter)      { rebuildList() }
             .onChange(of: sortOrder)   { rebuildList() }
+            // words가 변경될 때 cachedList가 빈 상태(초기 비어있던 상태)면 즉시 채워줌.
+            // 일반적인 변경에는 영향이 없도록 빈 상태일 때만 rebuild.
+            .onChange(of: words) {
+                if cachedList.isEmpty && !words.isEmpty {
+                    rebuildList()
+                }
+            }
         }
     }
 

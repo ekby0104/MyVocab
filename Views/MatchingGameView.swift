@@ -36,6 +36,8 @@ struct MatchingGameView: View {
     @State private var wrongWordIds: Set<String> = []
     /// 게임 중 첫 시도에 매칭 성공한 단어 ID들 (정답으로 처리할 단어)
     @State private var correctWordIds: Set<String> = []
+    /// 게임 종료 처리(SRS 적용)가 한 번만 실행되도록 가드
+    @State private var isFinalized = false
 
     @State private var showGiveUpAlert = false
 
@@ -404,7 +406,7 @@ struct MatchingGameView: View {
             GeometryReader { geo in
                 let columns = gridColumns
                 let rows = Int(ceil(Double(cards.count) / Double(columns)))
-                let spacing: CGFloat = 5
+                let spacing: CGFloat = 2
                 let cardWidth = floor((geo.size.width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
                 let cardHeight = floor((geo.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows))
 
@@ -719,6 +721,7 @@ struct MatchingGameView: View {
         wrongCount = 0
         wrongWordIds = []
         correctWordIds = []
+        isFinalized = false
         isTimeUp = false
         isProcessing = false
         timeRemaining = timeLimit
@@ -762,6 +765,8 @@ struct MatchingGameView: View {
             correctFlash = [firstCard.id, secondCard.id]
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                // 그 사이에 게임이 종료됐다면 무시
+                guard !isFinalized else { return }
                 withAnimation {
                     matchedPairs.insert(firstCard.wordId)
                     correctFlash = []
@@ -786,6 +791,8 @@ struct MatchingGameView: View {
             wrongWordIds.insert(englishCard.wordId)
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                // 그 사이에 게임이 종료됐다면 무시
+                guard !isFinalized else { return }
                 withAnimation { wrongFlash = [] }
                 firstSelected = nil
                 isProcessing = false
@@ -798,19 +805,27 @@ struct MatchingGameView: View {
     private func startTimer() {
         stopTimer()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            guard !isFinalized else {
+                stopTimer()
+                return
+            }
             if timeRemaining > 0 {
                 timeRemaining -= 0.1
             } else {
                 timeRemaining = 0
-                isTimeUp = true
                 stopTimer()
+                isTimeUp = true
                 finalizeGame()
             }
         }
     }
 
     /// 게임 종료 시 일괄 SRS 처리 (전체 성공/시간 초과/포기 모든 경우)
+    /// 중복 호출 방지를 위해 isFinalized 플래그 사용
     private func finalizeGame() {
+        guard !isFinalized else { return }
+        isFinalized = true
+
         for word in gameWords {
             if correctWordIds.contains(word.id) {
                 SRSService.correct(word)

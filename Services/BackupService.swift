@@ -20,6 +20,9 @@ enum BackupService {
         var wrongCount: Int
         var isFavorite: Bool
         var isWrong: Bool
+        // v2부터 추가 (이전 버전과 호환되도록 옵셔널)
+        var srsLevel: Int?
+        var nextReviewDate: Date?
     }
 
     struct BackupFile: Codable {
@@ -27,6 +30,8 @@ enum BackupService {
         var exportedAt: Date
         var words: [WordBackup]
     }
+
+    private static let currentVersion = 2
 
     // MARK: - Export
 
@@ -49,11 +54,13 @@ enum BackupService {
                 correctCount: w.correctCount,
                 wrongCount: w.wrongCount,
                 isFavorite: w.isFavorite,
-                isWrong: w.isWrong
+                isWrong: w.isWrong,
+                srsLevel: w.srsLevel,
+                nextReviewDate: w.nextReviewDate
             )
         }
 
-        let file = BackupFile(version: 1, exportedAt: .now, words: backups)
+        let file = BackupFile(version: currentVersion, exportedAt: .now, words: backups)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -114,13 +121,20 @@ enum BackupService {
             let key = backup.english.lowercased()
             if let existingWord = existingByKey[key] {
                 // 기존 단어 → 백업 데이터로 메타데이터만 덮어쓰기
-                // (단어/뜻은 유지, 즐겨찾기/메모/통계는 복원)
+                // (단어/뜻은 유지, 즐겨찾기/메모/통계/SRS는 복원)
                 existingWord.memo = backup.memo
                 existingWord.isFavorite = backup.isFavorite
                 existingWord.isWrong = backup.isWrong
                 existingWord.correctCount = backup.correctCount
                 existingWord.wrongCount = backup.wrongCount
                 existingWord.lastReviewedAt = backup.lastReviewedAt
+                // v2부터 추가된 필드 (구버전 백업이면 nil → 기본값 유지)
+                if let srsLevel = backup.srsLevel {
+                    existingWord.srsLevel = srsLevel
+                }
+                if backup.nextReviewDate != nil {
+                    existingWord.nextReviewDate = backup.nextReviewDate
+                }
                 restored += 1
             } else {
                 // 새 단어 추가
@@ -137,7 +151,9 @@ enum BackupService {
                     correctCount: backup.correctCount,
                     wrongCount: backup.wrongCount,
                     isFavorite: backup.isFavorite,
-                    isWrong: backup.isWrong
+                    isWrong: backup.isWrong,
+                    srsLevel: backup.srsLevel ?? 0,
+                    nextReviewDate: backup.nextReviewDate
                 )
                 context.insert(word)
                 existingByKey[key] = word

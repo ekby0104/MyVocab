@@ -313,21 +313,29 @@ struct WordDetailView: View {
     // MARK: - Reset controls
 
     private var resetControls: some View {
-        HStack(spacing: 6) {
-            if word.wrongCount > 0 {
-                smallButton(icon: "minus.circle", label: "오답 카운트 초기화") {
-                    word.wrongCount = 0
-                    try? context.save()
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                if word.correctCount > 0 {
+                    smallButton(icon: "plus.circle", label: "정답 카운트 초기화") {
+                        word.correctCount = 0
+                        try? context.save()
+                    }
                 }
-            }
-            if word.isWrong {
-                smallButton(icon: "checkmark.circle", label: "틀린 단어 해제") {
-                    word.isWrong = false
-                    try? context.save()
+                if word.wrongCount > 0 {
+                    smallButton(icon: "minus.circle", label: "오답 카운트 초기화") {
+                        word.wrongCount = 0
+                        try? context.save()
+                    }
                 }
-            }
-            smallButton(icon: "arrow.counterclockwise", label: "전체 초기화") {
-                showResetAlert = true
+                if word.isWrong {
+                    smallButton(icon: "checkmark.circle", label: "틀린 단어 해제") {
+                        word.isWrong = false
+                        try? context.save()
+                    }
+                }
+                smallButton(icon: "arrow.counterclockwise", label: "전체 초기화") {
+                    showResetAlert = true
+                }
             }
         }
     }
