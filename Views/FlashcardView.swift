@@ -8,19 +8,22 @@ struct FlashcardView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var allWords: [Word]
 
-    @State private var selectedSource: SourceType = .all
+    @State private var selectedSource: SourceType = .dueToday
     @State private var started = false
 
     @State private var deck: [Word] = []
     @State private var index: Int = 0
     @State private var showBack: Bool = false
     @AppStorage("flashcard.autoTTS") private var autoTTS: Bool = false
+    /// 레벨별 학습 시 선택된 레벨들 (0~SRSService.maxLevel)
+    @State private var selectedLevels: Set<Int> = []
 
     enum SourceType: String, CaseIterable, Identifiable {
         case all       = "전체 단어"
         case favorites = "즐겨찾기"
         case wrongOnly = "틀린 단어"
         case dueToday  = "오늘의 학습"
+        case byLevel   = "레벨별"
         var id: String { rawValue }
 
         var icon: String {
@@ -29,6 +32,7 @@ struct FlashcardView: View {
             case .favorites: return "star"
             case .wrongOnly: return "arrow.counterclockwise"
             case .dueToday:  return "calendar"
+            case .byLevel:   return "chart.bar"
             }
         }
     }
@@ -50,7 +54,88 @@ struct FlashcardView: View {
                 if let next = w.nextReviewDate { return next <= now }
                 return true
             }
+        case .byLevel:
+            return base.filter { selectedLevels.contains($0.srsLevel) }
         }
+    }
+
+    /// 레벨 체크박스 그룹 (byLevel 소스 선택 시 노출)
+    private var levelPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("레벨 선택")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                Spacer()
+                Button {
+                    if selectedLevels.count == SRSService.maxLevel + 1 {
+                        selectedLevels = []
+                    } else {
+                        selectedLevels = Set(0...SRSService.maxLevel)
+                    }
+                } label: {
+                    Text(selectedLevels.count == SRSService.maxLevel + 1 ? "전체 해제" : "전체 선택")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ink)
+                }
+                .buttonStyle(.plain)
+            }
+
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 6),
+                GridItem(.flexible(), spacing: 6)
+            ], spacing: 6) {
+                ForEach(0...SRSService.maxLevel, id: \.self) { lv in
+                    levelChip(lv)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func levelChip(_ lv: Int) -> some View {
+        let isSelected = selectedLevels.contains(lv)
+        let count = allWords.filter {
+            !$0.english.isEmpty && !$0.meaning.isEmpty && $0.srsLevel == lv
+        }.count
+        return Button {
+            if isSelected {
+                selectedLevels.remove(lv)
+            } else {
+                selectedLevels.insert(lv)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 12))
+                    .foregroundStyle(isSelected ? Theme.ink : Theme.muted)
+                Text("Lv.\(lv)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                Text("\(count)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Theme.chipBg : Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     var body: some View {
@@ -173,8 +258,11 @@ struct FlashcardView: View {
                             )
                         }
                         .buttonStyle(.plain)
-                        .disabled(count == 0)
-                        .opacity(count == 0 ? 0.45 : 1)
+                        .disabled(count == 0 && source != .byLevel)
+                        .opacity(count == 0 && source != .byLevel ? 0.45 : 1)
+                    }
+                    if selectedSource == .byLevel {
+                        levelPicker
                     }
                 }
                 .padding(.horizontal, 20)
@@ -235,7 +323,7 @@ struct FlashcardView: View {
                 flashCard(for: word)
                     .padding(.horizontal, 20)
                     .onTapGesture {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                        withAnimation(.easeInOut(duration: 0.25)) {
                             showBack.toggle()
                         }
                     }
@@ -318,6 +406,16 @@ struct FlashcardView: View {
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer()
+                NavigationLink {
+                    WordDetailView(word: word)
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 30, height: 30)
+                        .background(Theme.chipBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain)
                 Button {
                     SpeechService.shared.speak(word.english)
                 } label: {
@@ -331,8 +429,9 @@ struct FlashcardView: View {
             }
             .padding(14)
 
-            VStack(spacing: 10) {
-                if showBack {
+            ZStack {
+                // 뒷면 (뜻 / 예문)
+                VStack(spacing: 10) {
                     if word.meaning.isEmpty {
                         Text("-")
                             .font(.system(size: 22, weight: .semibold))
@@ -356,7 +455,11 @@ struct FlashcardView: View {
                                 .multilineTextAlignment(.center)
                         }
                     }
-                } else {
+                }
+                .opacity(showBack ? 1 : 0)
+
+                // 앞면 (영어 단어)
+                VStack(spacing: 10) {
                     Text(word.english)
                         .font(.system(size: 30, weight: .bold))
                         .foregroundStyle(Theme.ink)
@@ -373,6 +476,7 @@ struct FlashcardView: View {
                         .foregroundStyle(Theme.muted)
                         .padding(.top, 4)
                 }
+                .opacity(showBack ? 0 : 1)
             }
             .padding(.horizontal, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -413,19 +517,15 @@ struct FlashcardView: View {
 
     private func next() {
         guard !deck.isEmpty else { return }
-        withAnimation {
-            showBack = false
-            index = (index + 1) % deck.count
-        }
+        showBack = false
+        index = (index + 1) % deck.count
         if autoTTS, let w = current { SpeechService.shared.speak(w.english) }
     }
 
     private func prev() {
         guard !deck.isEmpty else { return }
-        withAnimation {
-            showBack = false
-            index = (index - 1 + deck.count) % deck.count
-        }
+        showBack = false
+        index = (index - 1 + deck.count) % deck.count
         if autoTTS, let w = current { SpeechService.shared.speak(w.english) }
     }
 }

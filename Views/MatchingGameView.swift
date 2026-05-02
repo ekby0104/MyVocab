@@ -11,7 +11,9 @@ struct MatchingGameView: View {
     @Query private var allWords: [Word]
 
     // 시작 화면 선택
-    @State private var selectedSource: SourceType = .all
+    @State private var selectedSource: SourceType = .dueToday
+    /// 레벨별 학습 시 선택된 레벨들 (0~SRSService.maxLevel)
+    @State private var selectedLevels: Set<Int> = []
 
     // 게임 상태
     @State private var started = false
@@ -50,6 +52,7 @@ struct MatchingGameView: View {
         case favorites = "즐겨찾기"
         case wrongOnly = "틀린 단어"
         case dueToday  = "오늘의 학습"
+        case byLevel   = "레벨별"
         var id: String { rawValue }
 
         var icon: String {
@@ -58,6 +61,7 @@ struct MatchingGameView: View {
             case .favorites: return "star"
             case .wrongOnly: return "arrow.counterclockwise"
             case .dueToday:  return "calendar"
+            case .byLevel:   return "chart.bar"
             }
         }
     }
@@ -74,6 +78,8 @@ struct MatchingGameView: View {
                 if let next = w.nextReviewDate { return next <= now }
                 return true
             }
+        case .byLevel:
+            return base.filter { selectedLevels.contains($0.srsLevel) }
         }
     }
 
@@ -88,7 +94,8 @@ struct MatchingGameView: View {
             .dueToday: base.filter { w in
                 if let next = w.nextReviewDate { return next <= now }
                 return true
-            }.count
+            }.count,
+            .byLevel: base.filter { selectedLevels.contains($0.srsLevel) }.count
         ]
     }
 
@@ -254,7 +261,89 @@ struct MatchingGameView: View {
             ForEach(SourceType.allCases) { source in
                 sourceRow(source)
             }
+            if selectedSource == .byLevel {
+                levelPicker
+            }
         }
+    }
+
+    /// 레벨 체크박스 그룹 (byLevel 소스 선택 시 노출)
+    private var levelPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("레벨 선택")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                Spacer()
+                Button {
+                    if selectedLevels.count == SRSService.maxLevel + 1 {
+                        selectedLevels = []
+                    } else {
+                        selectedLevels = Set(0...SRSService.maxLevel)
+                    }
+                } label: {
+                    Text(selectedLevels.count == SRSService.maxLevel + 1 ? "전체 해제" : "전체 선택")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ink)
+                }
+                .buttonStyle(.plain)
+            }
+
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 6),
+                GridItem(.flexible(), spacing: 6)
+            ], spacing: 6) {
+                ForEach(0...SRSService.maxLevel, id: \.self) { lv in
+                    levelChip(lv)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func levelChip(_ lv: Int) -> some View {
+        let isSelected = selectedLevels.contains(lv)
+        let count = allWords.filter {
+            !$0.english.isEmpty && !$0.meaning.isEmpty && $0.srsLevel == lv
+        }.count
+        return Button {
+            if isSelected {
+                selectedLevels.remove(lv)
+            } else {
+                selectedLevels.insert(lv)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 12))
+                    .foregroundStyle(isSelected ? Theme.ink : Theme.muted)
+                Text("Lv.\(lv)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                Text("\(count)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Theme.chipBg : Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     /// 10초 단위로 10초 ~ 120초 (2분)
@@ -348,10 +437,10 @@ struct MatchingGameView: View {
                     .stroke(isSelected ? Theme.ink : Theme.line, lineWidth: isSelected ? 1.2 : 0.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 10))
-            .opacity(count < totalPairs ? 0.45 : 1)
+            .opacity(count < totalPairs && source != .byLevel ? 0.45 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(count < totalPairs)
+        .disabled(count < totalPairs && source != .byLevel)
     }
 
     // MARK: - Game Screen

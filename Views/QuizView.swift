@@ -11,14 +11,17 @@ struct QuizView: View {
     @Environment(\.verticalSizeClass) private var vSizeClass
     @Query private var allWords: [Word]
 
-    @State private var selectedSource: SourceType = .all
+    @State private var selectedSource: SourceType = .dueToday
     @State private var started = false
+    /// 레벨별 학습 시 선택된 레벨들 (0~SRSService.maxLevel)
+    @State private var selectedLevels: Set<Int> = []
 
     enum SourceType: String, CaseIterable, Identifiable {
         case all       = "전체 단어"
         case favorites = "즐겨찾기"
         case wrongOnly = "틀린 단어"
         case dueToday  = "오늘의 학습"
+        case byLevel   = "레벨별"
         var id: String { rawValue }
 
         var icon: String {
@@ -27,6 +30,7 @@ struct QuizView: View {
             case .favorites: return "star"
             case .wrongOnly: return "arrow.counterclockwise"
             case .dueToday:  return "calendar"
+            case .byLevel:   return "chart.bar"
             }
         }
     }
@@ -47,12 +51,10 @@ struct QuizView: View {
 
     @State private var questionShownAt: Date? = nil
     @State private var wasSlowResponse: Bool = false
-    private let slowThreshold: TimeInterval = 5.0
-    @State private var elapsed: TimeInterval = 0
+    @AppStorage("quizGame.timeLimit") private var quizTimeSeconds: Int = 10
+    private var slowThreshold: TimeInterval { TimeInterval(quizTimeSeconds) }
 
-    @State private var quizCount: Int = 20
-    @State private var customCountText: String = ""
-    private let countOptions = [10, 20, 50, 100, 200, 500, 1000]
+    @State private var elapsed: TimeInterval = 0
 
     private var current: Word? {
         guard quizDeck.indices.contains(index) else { return nil }
@@ -71,6 +73,8 @@ struct QuizView: View {
                 if let next = w.nextReviewDate { return next <= now }
                 return true
             }
+        case .byLevel:
+            return base.filter { selectedLevels.contains($0.srsLevel) }
         }
     }
 
@@ -85,12 +89,25 @@ struct QuizView: View {
             .dueToday: base.filter { w in
                 if let next = w.nextReviewDate { return next <= now }
                 return true
-            }.count
+            }.count,
+            .byLevel: base.filter { selectedLevels.contains($0.srsLevel) }.count
         ]
     }
 
     private var sourcePool: [Word] { wordsForSource(selectedSource) }
-    private var effectiveCount: Int { min(quizCount, sourcePool.count) }
+
+    /// 소스별 최소 필요 단어 수
+    /// - dueToday, byLevel: 1개 (다른 소스에서 오답 선택지 가져옴)
+    /// - 그 외: 6개 (6지선다 옵션 보장)
+    private var minRequired: Int {
+        (selectedSource == .dueToday || selectedSource == .byLevel) ? 1 : 6
+    }
+
+    /// 6지선다 오답 선택지 만들 수 있는지 (전체 단어 5개 이상 필요)
+    private var canMakeDistractors: Bool {
+        let total = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }.count
+        return total >= 6
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -167,7 +184,7 @@ struct QuizView: View {
                     Text("6지선다 퀴즈")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.ink)
-                    Text("5초 안에 답하지 않으면 오답")
+                    Text("10초 안에 답하지 않으면 오답")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.muted)
                 }
@@ -176,18 +193,21 @@ struct QuizView: View {
                     ForEach(SourceType.allCases) { s in
                         sourceRow(s)
                     }
+                    if selectedSource == .byLevel {
+                        levelPicker
+                    }
                 }
                 .padding(.horizontal, 20)
 
                 modeSegmented.padding(.horizontal, 20)
 
-                countCard.padding(.horizontal, 20)
+                timeCard.padding(.horizontal, 20)
 
                 HStack {
                     Button { start() } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "play.fill").font(.system(size: 11))
-                            Text("시작 · \(effectiveCount)문제")
+                            Text("시작")
                                 .font(.system(size: 14, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity)
@@ -197,13 +217,19 @@ struct QuizView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
-                    .disabled(sourcePool.count < 6)
-                    .opacity(sourcePool.count < 6 ? 0.4 : 1)
+                    .disabled(sourcePool.count < minRequired || !canMakeDistractors)
+                    .opacity((sourcePool.count < minRequired || !canMakeDistractors) ? 0.4 : 1)
                 }
                 .padding(.horizontal, 20)
 
-                if sourcePool.count < 6 {
-                    Text("단어가 6개 이상 필요합니다")
+                if !canMakeDistractors {
+                    Text("전체 단어가 6개 이상 필요합니다")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.wrong)
+                } else if sourcePool.count < minRequired {
+                    Text(selectedSource == .dueToday
+                         ? "오늘 학습할 단어가 없습니다"
+                         : "단어가 \(minRequired)개 이상 필요합니다")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.wrong)
                 }
@@ -212,6 +238,85 @@ struct QuizView: View {
             }
             .padding(.top, 4)
         }
+    }
+
+    /// 레벨 체크박스 그룹 (byLevel 소스 선택 시 노출)
+    private var levelPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("레벨 선택")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                Spacer()
+                Button {
+                    if selectedLevels.count == SRSService.maxLevel + 1 {
+                        selectedLevels = []
+                    } else {
+                        selectedLevels = Set(0...SRSService.maxLevel)
+                    }
+                } label: {
+                    Text(selectedLevels.count == SRSService.maxLevel + 1 ? "전체 해제" : "전체 선택")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.ink)
+                }
+                .buttonStyle(.plain)
+            }
+
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 6),
+                GridItem(.flexible(), spacing: 6)
+            ], spacing: 6) {
+                ForEach(0...SRSService.maxLevel, id: \.self) { lv in
+                    levelChip(lv)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func levelChip(_ lv: Int) -> some View {
+        let isSelected = selectedLevels.contains(lv)
+        let count = allWords.filter {
+            !$0.english.isEmpty && !$0.meaning.isEmpty && $0.srsLevel == lv
+        }.count
+        return Button {
+            if isSelected {
+                selectedLevels.remove(lv)
+            } else {
+                selectedLevels.insert(lv)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 12))
+                    .foregroundStyle(isSelected ? Theme.ink : Theme.muted)
+                Text("Lv.\(lv)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+                Text("\(count)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Theme.chipBg : Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     private func sourceRow(_ s: SourceType) -> some View {
@@ -247,8 +352,15 @@ struct QuizView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(count < 6)
-        .opacity(count < 6 ? 0.45 : 1)
+        .disabled(disabledForSource(s, count: count))
+        .opacity(disabledForSource(s, count: count) ? 0.45 : 1)
+    }
+
+    private func disabledForSource(_ s: SourceType, count: Int) -> Bool {
+        // byLevel은 항상 선택 가능 (선택 후 레벨 체크박스로 단어 추림)
+        if s == .byLevel { return false }
+        let required = s == .dueToday ? 1 : 6
+        return count < required
     }
 
     private var modeSegmented: some View {
@@ -277,51 +389,52 @@ struct QuizView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private var countCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("문제 수").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
-                Spacer()
-                Menu {
-                    ForEach(countOptions, id: \.self) { n in
-                        Button("\(n)개") { quizCount = n; customCountText = "" }
+    /// 5초 단위로 5초 ~ 30초
+    private static let timeOptions: [Int] = stride(from: 5, through: 30, by: 5).map { $0 }
+
+    private var timeCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "timer")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 24, height: 24)
+                .background(Theme.chipBg)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            Text("제한 시간")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.ink)
+
+            Spacer()
+
+            Menu {
+                Picker("제한 시간", selection: $quizTimeSeconds) {
+                    ForEach(Self.timeOptions, id: \.self) { sec in
+                        Text("\(sec)초").tag(sec)
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("\(quizCount)개")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.ink)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Theme.muted)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Theme.chipBg)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-            }
-            HStack(spacing: 8) {
-                Text("직접 입력").font(.system(size: 11)).foregroundStyle(Theme.muted)
-                TextField("예: 35", text: $customCountText)
-                    .font(.system(size: 12))
-                    .keyboardType(.numberPad)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Theme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.line, lineWidth: 0.5))
-                    .frame(maxWidth: 100)
-                    .onChange(of: customCountText) { _, v in
-                        let filtered = v.filter(\.isNumber)
-                        if filtered != v { customCountText = filtered }
-                        if let n = Int(filtered), n > 0 { quizCount = min(n, 1000) }
-                    }
-                Spacer()
+            } label: {
+                HStack(spacing: 4) {
+                    Text("\(quizTimeSeconds)초")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Theme.chipBg)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
-        .padding(12)
-        .background(Theme.surface)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line, lineWidth: 0.5))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: - Quiz running
@@ -465,19 +578,38 @@ struct QuizView: View {
             .padding(.horizontal, 22)
             .frame(maxWidth: .infinity)
 
-            if mode == .enToKo {
-                Button { SpeechService.shared.speak(word.english) } label: {
-                    Image(systemName: "speaker.wave.2")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.ink)
-                        .frame(width: 28, height: 28)
-                        .background(Theme.chipBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+            // 우상단 버튼 영역
+            HStack(spacing: 6) {
+                // 정보 버튼: 답이 처리된 후에만 표시
+                if selectedId != nil {
+                    NavigationLink {
+                        WordDetailView(word: word)
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.chipBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                .padding(12)
+
+                // 발음 버튼: 영→한 모드일 때만
+                if mode == .enToKo {
+                    Button { SpeechService.shared.speak(word.english) } label: {
+                        Image(systemName: "speaker.wave.2")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 28, height: 28)
+                            .background(Theme.chipBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(12)
         }
     }
 
@@ -601,13 +733,14 @@ struct QuizView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.muted)
 
-            HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 resultItem("\(correctCount)", "정답", Theme.correct)
                 resultItem("\(wrongCount)", "오답", Theme.wrong)
                 let total = correctCount + wrongCount
                 resultItem(total > 0 ? "\(Int(Double(correctCount)/Double(total)*100))%" : "0%",
                            "정답률", Theme.ink)
             }
+            .padding(.horizontal, 20)
             .padding(.top, 8)
 
             Button {
@@ -670,7 +803,7 @@ struct QuizView: View {
     private func start() {
         var src = sourcePool
         src.shuffle()
-        quizDeck = selectedSource == .wrongOnly ? src : Array(src.prefix(quizCount))
+        quizDeck = src
         index = 0
         correctCount = 0
         wrongCount = 0

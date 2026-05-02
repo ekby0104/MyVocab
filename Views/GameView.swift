@@ -183,7 +183,7 @@ struct GameView: View {
                 gameCard(emoji: "🎴", name: "플래시카드", sub: "앞뒤 뒤집기 · 섞기", meta: "TTS")
             }.buttonStyle(.plain)
             NavigationLink(value: GameDestination.quiz) {
-                gameCard(emoji: "🎯", name: "퀴즈", sub: "6지선다 · 영↔한", meta: "5초 제한")
+                gameCard(emoji: "🎯", name: "퀴즈", sub: "6지선다 · 영↔한", meta: "시간 선택")
             }.buttonStyle(.plain)
             NavigationLink(value: GameDestination.matching) {
                 gameCard(emoji: "🔀", name: "매칭", sub: "4×4 카드 도전", meta: "30초")

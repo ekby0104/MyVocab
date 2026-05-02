@@ -40,6 +40,7 @@ struct WordListView: View {
         case alphabetDesc  = "알파벳 역순"
         case favorite      = "즐겨찾기 우선"
         case wrong         = "오답 순"
+        case dueDate       = "복습 임박순"
         case random        = "랜덤"
         var id: String { rawValue }
 
@@ -50,6 +51,7 @@ struct WordListView: View {
             case .alphabetDesc: return "textformat.abc.dottedunderline"
             case .favorite:     return "star.fill"
             case .wrong:        return "xmark.circle"
+            case .dueDate:      return "calendar"
             case .random:       return "shuffle"
             }
         }
@@ -66,6 +68,13 @@ struct WordListView: View {
         }
         cachedList = sortWords(base)
         cachedCount = cachedList.count
+    }
+
+    /// 복습 임박순 정렬 우선순위 (낮을수록 위)
+    /// 0: NEW, 1: 복습 가능, 2: 미래 예정
+    private func duePriority(_ word: Word) -> Int {
+        guard let next = word.nextReviewDate else { return 0 }   // NEW
+        return next <= Date() ? 1 : 2
     }
 
     private func sortWords(_ list: [Word]) -> [Word] {
@@ -85,6 +94,26 @@ struct WordListView: View {
                 if lhs.wrongCount != rhs.wrongCount { return lhs.wrongCount > rhs.wrongCount }
                 return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
             }
+        case .dueDate:
+            // 복습 임박순:
+            // 1. NEW (미학습, nextReviewDate == nil)
+            // 2. 복습 가능 (nextReviewDate <= now)
+            // 3. 가까운 미래 → 먼 미래 (오늘 중 → 내일 → ...)
+            list.sort { lhs, rhs in
+                let lp = duePriority(lhs)
+                let rp = duePriority(rhs)
+                if lp != rp { return lp < rp }
+                // 같은 그룹 내 정렬
+                switch (lhs.nextReviewDate, rhs.nextReviewDate) {
+                case (nil, nil):
+                    return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
+                case let (l?, r?):
+                    if l != r { return l < r }
+                    return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
+                default:
+                    return false
+                }
+            }
         case .random: list.shuffle()
         }
         return list
@@ -103,16 +132,9 @@ struct WordListView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 10)
 
-                // 리스트 — words에 데이터가 있는데 캐시가 비어있는 초기 상태에서는
-                // emptyState 대신 캐시 재계산을 트리거하기 위한 보호 처리
+                // 리스트
                 if cachedList.isEmpty {
-                    if words.isEmpty {
-                        emptyState
-                    } else {
-                        // @Query가 비동기로 채워졌으나 cachedList가 아직 빈 케이스 — 즉시 재계산
-                        Color.clear
-                            .onAppear { rebuildList() }
-                    }
+                    emptyState
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
@@ -146,7 +168,7 @@ struct WordListView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 20)
                     }
-                    .scrollIndicators(.hidden)
+                    .scrollIndicators(.visible)
                 }
             }
             .background(Theme.surface)
@@ -163,13 +185,6 @@ struct WordListView: View {
             .onChange(of: words.count) { rebuildList() }
             .onChange(of: filter)      { rebuildList() }
             .onChange(of: sortOrder)   { rebuildList() }
-            // words가 변경될 때 cachedList가 빈 상태(초기 비어있던 상태)면 즉시 채워줌.
-            // 일반적인 변경에는 영향이 없도록 빈 상태일 때만 rebuild.
-            .onChange(of: words) {
-                if cachedList.isEmpty && !words.isEmpty {
-                    rebuildList()
-                }
-            }
         }
     }
 
@@ -398,6 +413,9 @@ struct WordCardRow: View {
             result.append(VocabChip(text: "Mastered · Lv.\(word.srsLevel)", kind: .neutral))
         } else if word.lastReviewedAt == nil {
             result.append(VocabChip(text: "NEW", kind: .correct))
+        } else if let label = dueLabel {
+            // 학습한 적 있고 마스터 레벨 미만 → 다음 복습일 표시
+            result.append(VocabChip(text: label, kind: dueChipKind))
         }
         if word.wrongCount > 0 {
             result.append(VocabChip(text: "✗ \(word.wrongCount)", kind: .wrong))
@@ -406,5 +424,52 @@ struct WordCardRow: View {
 //            result.append(VocabChip(text: "즐겨찾기", kind: .favorite))
 //        }
         return result
+    }
+
+    /// 다음 복습일을 사람이 읽기 좋은 라벨로 변환
+    private var dueLabel: String? {
+        guard let next = word.nextReviewDate else { return nil }
+        let now = Date()
+        let cal = Calendar.current
+        let startOfToday = cal.startOfDay(for: now)
+        let startOfDueDay = cal.startOfDay(for: next)
+        let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
+
+        if next <= now { return "복습 가능" }
+        if days == 0 {
+            // 오늘 중 - 잔여 시간(시:분 또는 분 단위) 표시
+            let comps = cal.dateComponents([.hour, .minute], from: now, to: next)
+            let h = comps.hour ?? 0
+            let m = comps.minute ?? 0
+            if h > 0 {
+                return "\(h)시간 \(m)분 후"
+            } else if m > 0 {
+                return "\(m)분 후"
+            } else {
+                return "곧 복습"
+            }
+        }
+        if days == 1 { return "내일" }
+        if days < 7 { return "\(days)일 후" }
+        return "\(days / 7)주 후"
+    }
+
+    /// 복습일 칩의 강조 색상
+    /// - 복습 가능 (이미 도래): 초록 (correct)
+    /// - 오늘 중: 파란색 (info) - 중요 강조
+    /// - 내일: 노란색 (favorite)
+    /// - 그 외: 회색 (neutral)
+    private var dueChipKind: VocabChip.Kind {
+        guard let next = word.nextReviewDate else { return .neutral }
+        let now = Date()
+        if next <= now { return .correct }
+
+        let cal = Calendar.current
+        let startOfToday = cal.startOfDay(for: now)
+        let startOfDueDay = cal.startOfDay(for: next)
+        let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
+        if days == 0 { return .info }      // 오늘 중 → 파란색
+        if days == 1 { return .favorite }  // 내일 → 노란색
+        return .neutral
     }
 }

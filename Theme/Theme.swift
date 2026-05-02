@@ -97,7 +97,7 @@ extension View {
 
 struct VocabChip: View {
     enum Kind {
-        case neutral, wrong, favorite, correct
+        case neutral, wrong, favorite, correct, info
 
         var fg: Color {
             switch self {
@@ -105,6 +105,7 @@ struct VocabChip: View {
             case .wrong:    return Theme.wrong
             case .favorite: return Color(red: 0.72, green: 0.53, blue: 0.10)
             case .correct:  return Theme.correct
+            case .info:     return Theme.link
             }
         }
 
@@ -114,6 +115,7 @@ struct VocabChip: View {
             case .wrong:    return Theme.wrong.opacity(0.10)
             case .favorite: return Color(red: 1.0, green: 0.97, blue: 0.90)
             case .correct:  return Theme.correct.opacity(0.10)
+            case .info:     return Theme.link.opacity(0.10)
             }
         }
     }
