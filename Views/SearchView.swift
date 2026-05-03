@@ -54,8 +54,8 @@ struct SearchView: View {
 
     private func searchFields(of w: Word) -> [String] {
         switch scope {
-        case .all:     return [w.english, w.meaning, w.pronunciation, w.example, w.exampleKo]
-        case .word:    return [w.english, w.meaning, w.pronunciation]
+        case .all:     return [w.english, w.meaning, w.example, w.exampleKo]
+        case .word:    return [w.english, w.meaning]
         case .example: return [w.example, w.exampleKo]
         }
     }
@@ -67,8 +67,16 @@ struct SearchView: View {
             guard let regex = wildcardRegex(from: q) else { cachedResults = []; return }
             cachedResults = allWords.filter { searchFields(of: $0).contains { matches(regex, $0) } }
         } else {
-            let lower = q.lowercased()
-            cachedResults = allWords.filter { searchFields(of: $0).contains { $0.lowercased().contains(lower) } }
+            // 빠른 검색: localizedCaseInsensitiveContains 사용 (lowercased() 매 호출보다 빠름)
+            cachedResults = allWords.filter { word in
+                let fields = searchFields(of: word)
+                for field in fields {
+                    if field.localizedCaseInsensitiveContains(q) {
+                        return true
+                    }
+                }
+                return false
+            }
         }
     }
 
@@ -83,6 +91,10 @@ struct SearchView: View {
 
     private var allFavorited: Bool {
         !cachedResults.isEmpty && cachedResults.allSatisfy(\.isFavorite)
+    }
+
+    private var allHard: Bool {
+        !cachedResults.isEmpty && cachedResults.allSatisfy(\.isHard)
     }
 
     // MARK: Body
@@ -334,15 +346,31 @@ struct SearchView: View {
                     .tracking(0.5)
                 Spacer()
                 Button {
+                    bulkToggleHard()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(allHard ? Theme.muted : Theme.hard)
+                        Text(allHard ? "해제" : "선택")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.ink)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 10)
+
+                Button {
                     bulkToggleFavorite()
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: allFavorited ? "star.slash" : "star.fill")
+                        Image(systemName: "star.fill")
                             .font(.system(size: 10))
-                        Text(allFavorited ? "전체 해제" : "전체 즐겨찾기")
+                            .foregroundStyle(allFavorited ? Theme.muted : Theme.favorite)
+                        Text(allFavorited ? "해제" : "선택")
                             .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.ink)
                     }
-                    .foregroundStyle(Theme.ink)
                 }
                 .buttonStyle(.plain)
             }
@@ -357,7 +385,8 @@ struct SearchView: View {
                                 word: word,
                                 showMeaning: true,
                                 isLast: idx == cachedResults.count - 1,
-                                onToggleFavorite: { toggleFavorite(word) }
+                                onToggleFavorite: { toggleFavorite(word) },
+                                onToggleHard: { toggleHard(word) }
                             )
                         }
                         .buttonStyle(.plain)
@@ -365,6 +394,10 @@ struct SearchView: View {
                             Button { toggleFavorite(word) } label: {
                                 Label(word.isFavorite ? "즐겨찾기 해제" : "즐겨찾기",
                                       systemImage: word.isFavorite ? "star.slash" : "star")
+                            }
+                            Button { toggleHard(word) } label: {
+                                Label(word.isHard ? "어려움 해제" : "어려움 표시",
+                                      systemImage: word.isHard ? "flame.fill" : "flame")
                             }
                             Button(role: .destructive) { delete(word) } label: {
                                 Label("삭제", systemImage: "trash")
@@ -386,6 +419,10 @@ struct SearchView: View {
         word.isFavorite.toggle(); try? context.save()
     }
 
+    private func toggleHard(_ word: Word) {
+        word.isHard.toggle(); try? context.save()
+    }
+
     private func delete(_ word: Word) {
         context.delete(word); try? context.save()
     }
@@ -399,6 +436,18 @@ struct SearchView: View {
         bulkMessage = willFavorite
             ? "\(targets.count)개 단어를 즐겨찾기에 추가했어요"
             : "\(targets.count)개 단어의 즐겨찾기를 해제했어요"
+        showBulkAlert = true
+    }
+
+    private func bulkToggleHard() {
+        let targets = cachedResults
+        let willHard = !allHard
+        for w in targets { w.isHard = willHard }
+        try? context.save()
+        performSearch()
+        bulkMessage = willHard
+            ? "\(targets.count)개 단어를 어려움으로 표시했어요"
+            : "\(targets.count)개 단어의 어려움 표시를 해제했어요"
         showBulkAlert = true
     }
 

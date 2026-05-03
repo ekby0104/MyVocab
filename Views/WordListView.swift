@@ -39,6 +39,7 @@ struct WordListView: View {
         case alphabet      = "알파벳"
         case alphabetDesc  = "알파벳 역순"
         case favorite      = "즐겨찾기 우선"
+        case hard          = "어려움 우선"
         case wrong         = "오답 순"
         case dueDate       = "복습 임박순"
         case random        = "랜덤"
@@ -50,6 +51,7 @@ struct WordListView: View {
             case .alphabet:     return "textformat.abc"
             case .alphabetDesc: return "textformat.abc.dottedunderline"
             case .favorite:     return "star.fill"
+            case .hard:         return "flame.fill"
             case .wrong:        return "xmark.circle"
             case .dueDate:      return "calendar"
             case .random:       return "shuffle"
@@ -86,6 +88,11 @@ struct WordListView: View {
         case .favorite:
             list.sort { lhs, rhs in
                 if lhs.isFavorite != rhs.isFavorite { return lhs.isFavorite && !rhs.isFavorite }
+                return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
+            }
+        case .hard:
+            list.sort { lhs, rhs in
+                if lhs.isHard != rhs.isHard { return lhs.isHard && !rhs.isHard }
                 return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
             }
         case .wrong:
@@ -420,7 +427,7 @@ struct WordCardRow: View {
                     .font(.system(size: 14))
                     .foregroundStyle(word.isFavorite ? Theme.favorite : Theme.line)
                     .padding(.top, 1)
-                    .padding(.leading, 8)
+                    .padding(.leading, 2)
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
             }
@@ -444,66 +451,43 @@ struct WordCardRow: View {
             result.append(VocabChip(text: "Mastered · Lv.\(word.srsLevel)", kind: .neutral))
         } else if word.lastReviewedAt == nil {
             result.append(VocabChip(text: "NEW", kind: .correct))
-        } else if let label = dueLabel {
+        } else if let info = dueInfo {
             // 학습한 적 있고 마스터 레벨 미만 → 다음 복습일 표시
-            result.append(VocabChip(text: label, kind: dueChipKind))
+            result.append(VocabChip(text: info.label, kind: info.kind))
         }
         if word.wrongCount > 0 {
             result.append(VocabChip(text: "✗ \(word.wrongCount)", kind: .wrong))
         }
         if word.isHard {
-            result.append(VocabChip(text: "🔥 어려움", kind: .hard))
+            result.append(VocabChip(text: "🔥", kind: .hard))
         }
-//        if word.isFavorite {
-//            result.append(VocabChip(text: "즐겨찾기", kind: .favorite))
-//        }
         return result
     }
 
-    /// 다음 복습일을 사람이 읽기 좋은 라벨로 변환
-    private var dueLabel: String? {
+    /// 다음 복습일 정보 - 라벨과 칩 종류를 한 번에 계산
+    private var dueInfo: (label: String, kind: VocabChip.Kind)? {
         guard let next = word.nextReviewDate else { return nil }
         let now = Date()
+        if next <= now { return ("복습 가능", .correct) }
+
         let cal = Calendar.current
         let startOfToday = cal.startOfDay(for: now)
         let startOfDueDay = cal.startOfDay(for: next)
         let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
 
-        if next <= now { return "복습 가능" }
         if days == 0 {
             // 오늘 중 - 잔여 시간(시:분 또는 분 단위) 표시
             let comps = cal.dateComponents([.hour, .minute], from: now, to: next)
             let h = comps.hour ?? 0
             let m = comps.minute ?? 0
-            if h > 0 {
-                return "\(h)시간 \(m)분 후"
-            } else if m > 0 {
-                return "\(m)분 후"
-            } else {
-                return "곧 복습"
-            }
+            let label: String
+            if h > 0 { label = "\(h)시간 \(m)분 후" }
+            else if m > 0 { label = "\(m)분 후" }
+            else { label = "곧 복습" }
+            return (label, .info)  // 파란색
         }
-        if days == 1 { return "내일" }
-        if days < 7 { return "\(days)일 후" }
-        return "\(days / 7)주 후"
-    }
-
-    /// 복습일 칩의 강조 색상
-    /// - 복습 가능 (이미 도래): 초록 (correct)
-    /// - 오늘 중: 파란색 (info) - 중요 강조
-    /// - 내일: 노란색 (favorite)
-    /// - 그 외: 회색 (neutral)
-    private var dueChipKind: VocabChip.Kind {
-        guard let next = word.nextReviewDate else { return .neutral }
-        let now = Date()
-        if next <= now { return .correct }
-
-        let cal = Calendar.current
-        let startOfToday = cal.startOfDay(for: now)
-        let startOfDueDay = cal.startOfDay(for: next)
-        let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
-        if days == 0 { return .info }      // 오늘 중 → 파란색
-        if days == 1 { return .favorite }  // 내일 → 노란색
-        return .neutral
+        if days == 1 { return ("내일", .favorite) }   // 노란색
+        if days < 7 { return ("\(days)일 후", .neutral) }
+        return ("\(days / 7)주 후", .neutral)
     }
 }

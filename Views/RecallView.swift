@@ -54,8 +54,22 @@ struct RecallView: View {
         return deck[index]
     }
 
+    /// 유효한 단어들 (한 번만 계산)
+    private var validWords: [Word] {
+        allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+    }
+
+    /// 레벨별 단어 수
+    private var levelCounts: [Int: Int] {
+        var counts: [Int: Int] = [:]
+        for w in validWords {
+            counts[w.srsLevel, default: 0] += 1
+        }
+        return counts
+    }
+
     private func wordsForSource(_ source: SourceType) -> [Word] {
-        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let base = validWords
         switch source {
         case .all:       return base
         case .favorites: return base.filter(\.isFavorite)
@@ -216,8 +230,9 @@ struct RecallView: View {
                 GridItem(.flexible(), spacing: 6),
                 GridItem(.flexible(), spacing: 6)
             ], spacing: 6) {
+                let counts = levelCounts
                 ForEach(0...SRSService.maxLevel, id: \.self) { lv in
-                    levelChip(lv)
+                    levelChip(lv, count: counts[lv] ?? 0)
                 }
             }
         }
@@ -231,11 +246,8 @@ struct RecallView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    private func levelChip(_ lv: Int) -> some View {
+    private func levelChip(_ lv: Int, count: Int) -> some View {
         let isSelected = selectedLevels.contains(lv)
-        let count = allWords.filter {
-            !$0.english.isEmpty && !$0.meaning.isEmpty && $0.srsLevel == lv
-        }.count
         return Button {
             if isSelected {
                 selectedLevels.remove(lv)

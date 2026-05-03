@@ -9,7 +9,6 @@ struct SettingsView: View {
     @Environment(\.displayScale) private var displayScale
     @Query private var allWords: [Word]
     @AppStorage("selectedWordbookId") private var selectedWordbookId: String = ""
-    @AppStorage("learningMode") private var learningModeRaw: String = LearningMode.intensive.rawValue
 
     @State private var wordbookList: [Wordbook] = WordbookStorage.load()
 
@@ -54,10 +53,6 @@ struct SettingsView: View {
                             .padding(.bottom, 14)
 
                         naverGroup
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 12)
-
-                        learningModeGroup
                             .padding(.horizontal, 20)
                             .padding(.bottom, 12)
 
@@ -280,67 +275,6 @@ struct SettingsView: View {
             return "마지막: \(date.formatted(date: .abbreviated, time: .shortened))"
         }
         return "동기화 기록 없음"
-    }
-
-    private var currentLearningMode: LearningMode {
-        LearningMode(rawValue: learningModeRaw) ?? .intensive
-    }
-
-    private var learningModeGroup: some View {
-        settingsGroup(
-            title: "학습 모드",
-            subtitle: "복습 간격을 학습 목적에 맞게 선택하세요"
-        ) {
-            ForEach(Array(LearningMode.allCases.enumerated()), id: \.element.id) { idx, mode in
-                let isLast = idx == LearningMode.allCases.count - 1
-                Button {
-                    learningModeRaw = mode.rawValue
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: mode.icon)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.ink)
-                            .frame(width: 24, height: 24)
-                            .background(Theme.chipBg)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(mode.rawValue)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                            Text(mode.description)
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.muted)
-                            Text(intervalSummary(for: mode))
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.muted)
-                                .padding(.top, 2)
-                        }
-
-                        Spacer()
-
-                        Image(systemName: currentLearningMode == mode ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 18))
-                            .foregroundStyle(currentLearningMode == mode ? Theme.ink : Theme.line)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if !isLast {
-                    Rectangle().fill(Theme.line).frame(height: 1 / displayScale)
-                }
-            }
-        }
-    }
-
-    /// 모드별 간격 요약 텍스트
-    private func intervalSummary(for mode: LearningMode) -> String {
-        let days = mode.intervalsInDays.dropFirst()  // Lv.0 (즉시) 제외
-        return "Lv.1~7: " + days.map { "\($0)일" }.joined(separator: " · ")
     }
 
     private var dataGroup: some View {

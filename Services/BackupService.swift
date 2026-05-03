@@ -123,21 +123,25 @@ enum BackupService {
         for backup in file.words {
             let key = backup.english.lowercased()
             if let existingWord = existingByKey[key] {
-                // 기존 단어 → 백업 데이터로 메타데이터만 덮어쓰기
-                // (단어/뜻은 유지, 즐겨찾기/메모/통계/SRS는 복원)
+                // 기존 단어 → 백업 시점의 모든 데이터로 복원
+                existingWord.english = backup.english
+                existingWord.pronunciation = backup.pronunciation
+                existingWord.partOfSpeech = backup.partOfSpeech
+                existingWord.meaning = backup.meaning
+                existingWord.example = backup.example
+                existingWord.exampleKo = backup.exampleKo
                 existingWord.memo = backup.memo
-                existingWord.isFavorite = backup.isFavorite
-                existingWord.isWrong = backup.isWrong
+                existingWord.createdAt = backup.createdAt
+                existingWord.lastReviewedAt = backup.lastReviewedAt
                 existingWord.correctCount = backup.correctCount
                 existingWord.wrongCount = backup.wrongCount
-                existingWord.lastReviewedAt = backup.lastReviewedAt
+                existingWord.isFavorite = backup.isFavorite
+                existingWord.isWrong = backup.isWrong
                 // v2부터 추가된 필드 (구버전 백업이면 nil → 기본값 유지)
                 if let srsLevel = backup.srsLevel {
                     existingWord.srsLevel = srsLevel
                 }
-                if backup.nextReviewDate != nil {
-                    existingWord.nextReviewDate = backup.nextReviewDate
-                }
+                existingWord.nextReviewDate = backup.nextReviewDate
                 // v3부터 추가
                 if let isHard = backup.isHard {
                     existingWord.isHard = isHard

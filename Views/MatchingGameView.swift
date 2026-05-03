@@ -68,8 +68,22 @@ struct MatchingGameView: View {
         }
     }
 
+    /// 유효한 단어들 (한 번만 계산)
+    private var validWords: [Word] {
+        allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+    }
+
+    /// 레벨별 단어 수
+    private var levelCounts: [Int: Int] {
+        var counts: [Int: Int] = [:]
+        for w in validWords {
+            counts[w.srsLevel, default: 0] += 1
+        }
+        return counts
+    }
+
     private func wordsForSource(_ source: SourceType) -> [Word] {
-        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let base = validWords
         switch source {
         case .all:       return base
         case .favorites: return base.filter(\.isFavorite)
@@ -86,20 +100,31 @@ struct MatchingGameView: View {
         }
     }
 
-    // 캐싱: 시작 화면에서 반복 필터링 방지
+    // 캐싱: 단일 순회로 모든 소스 카운트 계산
     private var sourceCounts: [SourceType: Int] {
-        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let base = validWords
         let now = Date()
+        var allCount = 0
+        var favCount = 0
+        var wrongCount = 0
+        var hardCount = 0
+        var dueCount = 0
+        var byLevelCount = 0
+        for w in base {
+            allCount += 1
+            if w.isFavorite { favCount += 1 }
+            if w.isWrong { wrongCount += 1 }
+            if w.isHard { hardCount += 1 }
+            if let next = w.nextReviewDate { if next <= now { dueCount += 1 } } else { dueCount += 1 }
+            if selectedLevels.contains(w.srsLevel) { byLevelCount += 1 }
+        }
         return [
-            .all: base.count,
-            .favorites: base.filter(\.isFavorite).count,
-            .wrongOnly: base.filter(\.isWrong).count,
-            .hard: base.filter(\.isHard).count,
-            .dueToday: base.filter { w in
-                if let next = w.nextReviewDate { return next <= now }
-                return true
-            }.count,
-            .byLevel: base.filter { selectedLevels.contains($0.srsLevel) }.count
+            .all: allCount,
+            .favorites: favCount,
+            .wrongOnly: wrongCount,
+            .hard: hardCount,
+            .dueToday: dueCount,
+            .byLevel: byLevelCount
         ]
     }
 
@@ -298,8 +323,9 @@ struct MatchingGameView: View {
                 GridItem(.flexible(), spacing: 6),
                 GridItem(.flexible(), spacing: 6)
             ], spacing: 6) {
+                let counts = levelCounts
                 ForEach(0...SRSService.maxLevel, id: \.self) { lv in
-                    levelChip(lv)
+                    levelChip(lv, count: counts[lv] ?? 0)
                 }
             }
         }
@@ -313,11 +339,8 @@ struct MatchingGameView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
-    private func levelChip(_ lv: Int) -> some View {
+    private func levelChip(_ lv: Int, count: Int) -> some View {
         let isSelected = selectedLevels.contains(lv)
-        let count = allWords.filter {
-            !$0.english.isEmpty && !$0.meaning.isEmpty && $0.srsLevel == lv
-        }.count
         return Button {
             if isSelected {
                 selectedLevels.remove(lv)

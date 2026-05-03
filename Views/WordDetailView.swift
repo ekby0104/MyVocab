@@ -71,7 +71,7 @@ struct WordDetailView: View {
 
                     section(title: "학습 기록") {
                         statInline
-                        if word.correctCount > 0 || word.wrongCount > 0 || word.isWrong {
+                        if word.correctCount > 0 || word.wrongCount > 0 || word.isWrong || word.srsLevel > 0 {
                             resetControls
                                 .padding(.top, 10)
                         }

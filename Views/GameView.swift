@@ -17,18 +17,24 @@ struct GameView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.displayScale) private var displayScale
     @Query private var allWords: [Word]
+    @AppStorage("learningMode") private var learningModeRaw: String = LearningMode.intensive.rawValue
 
     @State private var showClearAlert = false
     @State private var showResetWrongAlert = false
     @State private var showResetAllAlert = false
     @State private var showResetSRSLevelAlert = false
     @State private var showResetSRSDateAlert = false
+    @State private var showRecalcDatesAlert = false
+    @State private var showClearFavoritesAlert = false
+    @State private var showClearHardAlert = false
 
     // 캐시된 값
     @State private var cachedDueCount: Int = 0
     @State private var cachedWrongWords: [Word] = []
     @State private var cachedHasAnyWrongCount: Bool = false
     @State private var cachedHasAnyLearning: Bool = false
+    @State private var cachedFavoriteCount: Int = 0
+    @State private var cachedHardCount: Int = 0
 
     init(path: Binding<NavigationPath>) {
         self._path = path
@@ -46,6 +52,8 @@ struct GameView: View {
         cachedWrongWords = allWords.filter(\.isWrong)
         cachedHasAnyWrongCount = allWords.contains { $0.wrongCount > 0 }
         cachedHasAnyLearning = allWords.contains { $0.correctCount > 0 || $0.wrongCount > 0 }
+        cachedFavoriteCount = allWords.filter(\.isFavorite).count
+        cachedHardCount = allWords.filter(\.isHard).count
     }
 
     var body: some View {
@@ -60,6 +68,10 @@ struct GameView: View {
                             .padding(.bottom, 14)
 
                         gameGrid
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 14)
+
+                        learningModeCard
                             .padding(.horizontal, 20)
                             .padding(.bottom, 16)
 
@@ -112,7 +124,78 @@ struct GameView: View {
             } message: {
                 Text("모든 단어의 복습 일자가 지금으로 변경되어\n즉시 복습 대기열에 들어갑니다.\n레벨과 정답·오답 기록은 유지됩니다.")
             }
+            .alert("복습 일자 재계산", isPresented: $showRecalcDatesAlert) {
+                Button("취소", role: .cancel) {}
+                Button("재계산", role: .destructive) { recalcAllReviewDates() }
+            } message: {
+                Text(recalcPreviewMessage)
+            }
+            .alert("즐겨찾기 전체 해제", isPresented: $showClearFavoritesAlert) {
+                Button("취소", role: .cancel) {}
+                Button("해제", role: .destructive) { clearAllFavorites() }
+            } message: {
+                Text("즐겨찾기된 단어 \(cachedFavoriteCount)개의 즐겨찾기가 모두 해제됩니다.")
+            }
+            .alert("어려움 전체 해제", isPresented: $showClearHardAlert) {
+                Button("취소", role: .cancel) {}
+                Button("해제", role: .destructive) { clearAllHard() }
+            } message: {
+                Text("🔥 어려움 표시된 단어 \(cachedHardCount)개의 표시가 모두 해제됩니다.")
+            }
         }
+    }
+
+    /// 재계산 미리보기 - 영향받는 단어 수 계산
+    private var recalcPreviewMessage: String {
+        let preview = previewRecalc()
+        var lines: [String] = []
+        lines.append("현재 학습 모드: \(currentLearningMode.rawValue)")
+        lines.append("")
+        lines.append("재계산 후:")
+        lines.append("• 즉시 복습 대기: \(preview.becomesDue)개")
+        lines.append("• 일정 변경: \(preview.dateChanged)개")
+        if preview.unchanged > 0 {
+            lines.append("• 변경 없음(미학습): \(preview.unchanged)개")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 재계산 미리보기 결과
+    private struct RecalcPreview {
+        var becomesDue: Int    // 재계산 후 즉시 복습 대기로 들어감
+        var dateChanged: Int   // 학습한 단어 중 일정만 바뀜
+        var unchanged: Int     // 미학습 단어 (lastReviewedAt == nil)
+    }
+
+    /// 실제로 적용하지 않고 미리 계산만
+    private func previewRecalc() -> RecalcPreview {
+        let intervals = SRSService.intervalsInDays
+        let cal = Calendar.current
+        let now = Date()
+        var becomesDue = 0
+        var dateChanged = 0
+        var unchanged = 0
+
+        for w in allWords {
+            guard let lastReview = w.lastReviewedAt else {
+                unchanged += 1
+                continue
+            }
+            let level = min(max(w.srsLevel, 0), SRSService.maxLevel)
+            let days = intervals[level]
+            let newDate: Date
+            if days <= 0 {
+                newDate = now
+            } else {
+                newDate = cal.date(byAdding: .day, value: days, to: lastReview) ?? now
+            }
+            if newDate <= now {
+                becomesDue += 1
+            } else {
+                dateChanged += 1
+            }
+        }
+        return RecalcPreview(becomesDue: becomesDue, dateChanged: dateChanged, unchanged: unchanged)
     }
 
     // MARK: - Top bar
@@ -251,6 +334,86 @@ struct GameView: View {
 
     // MARK: - Admin card
 
+    private var currentLearningMode: LearningMode {
+        LearningMode(rawValue: learningModeRaw) ?? .intensive
+    }
+
+    /// 학습 모드 선택 카드 - 집중 모드 / 균형 모드 토글
+    private var learningModeCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("학습 모드")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .tracking(0.5)
+                Spacer()
+                Text(currentLearningMode.rawValue)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.ink)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(LearningMode.allCases) { mode in
+                    learningModeChip(mode)
+                }
+            }
+        }
+        .padding(14)
+        .background(Theme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.line, lineWidth: 0.5)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func learningModeChip(_ mode: LearningMode) -> some View {
+        let isSelected = currentLearningMode == mode
+        return Button {
+            learningModeRaw = mode.rawValue
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: mode.icon)
+                        .font(.system(size: 12))
+                        .foregroundStyle(isSelected ? Theme.ink : Theme.muted)
+                    Text(mode.rawValue)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Spacer()
+                    if isSelected {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Theme.ink)
+                    }
+                }
+                Text(mode.description)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.muted)
+                Text(intervalSummary(for: mode))
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Theme.chipBg : Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isSelected ? Theme.ink.opacity(0.3) : Theme.line, lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 모드별 간격 요약 텍스트
+    private func intervalSummary(for mode: LearningMode) -> String {
+        let days = mode.intervalsInDays.dropFirst()  // Lv.0 (즉시) 제외
+        return days.map { "\($0)" }.joined(separator: "·") + "일"
+    }
+
     private var adminCard: some View {
         VStack(spacing: 0) {
             Text("관리")
@@ -267,6 +430,24 @@ struct GameView: View {
                      sub: cachedWrongWords.isEmpty ? "틀린 단어 없음" : "\(cachedWrongWords.count)개 해제",
                      disabled: cachedWrongWords.isEmpty) {
                 showClearAlert = true
+            }
+
+            divider
+
+            adminRow(icon: "star.slash",
+                     title: "즐겨찾기 전체 해제",
+                     sub: cachedFavoriteCount == 0 ? "즐겨찾기 없음" : "\(cachedFavoriteCount)개 해제",
+                     disabled: cachedFavoriteCount == 0) {
+                showClearFavoritesAlert = true
+            }
+
+            divider
+
+            adminRow(icon: "flame",
+                     title: "어려움 전체 해제",
+                     sub: cachedHardCount == 0 ? "어려움 표시 없음" : "\(cachedHardCount)개 해제",
+                     disabled: cachedHardCount == 0) {
+                showClearHardAlert = true
             }
 
             divider
@@ -303,6 +484,15 @@ struct GameView: View {
                      sub: "정답·오답·SRS 모두 리셋",
                      disabled: !cachedHasAnyLearning) {
                 showResetAllAlert = true
+            }
+
+            divider
+
+            adminRow(icon: "arrow.triangle.2.circlepath",
+                     title: "복습 일자 재계산",
+                     sub: "현재 학습 모드 간격으로 다시 계산",
+                     disabled: allWords.isEmpty) {
+                showRecalcDatesAlert = true
             }
         }
         .background(Theme.surface)
@@ -355,6 +545,18 @@ struct GameView: View {
         rebuildGameStats()
     }
 
+    private func clearAllFavorites() {
+        for w in allWords where w.isFavorite { w.isFavorite = false }
+        try? context.save()
+        rebuildGameStats()
+    }
+
+    private func clearAllHard() {
+        for w in allWords where w.isHard { w.isHard = false }
+        try? context.save()
+        rebuildGameStats()
+    }
+
     private func resetAllWrongCounts() {
         for w in allWords where w.wrongCount > 0 { w.wrongCount = 0 }
         try? context.save()
@@ -390,6 +592,32 @@ struct GameView: View {
         let now = Date()
         for w in allWords {
             w.nextReviewDate = now
+        }
+        try? context.save()
+        rebuildGameStats()
+    }
+
+    /// 현재 학습 모드의 간격으로 모든 학습한 단어의 nextReviewDate를 재계산
+    /// - 마지막 학습 시점(lastReviewedAt) 기준으로 간격 추가
+    /// - lastReviewedAt이 없는 단어 (미학습)는 그대로 유지
+    /// - 레벨 0이면 즉시 복습으로 설정
+    private func recalcAllReviewDates() {
+        let intervals = SRSService.intervalsInDays
+        let cal = Calendar.current
+
+        for w in allWords {
+            // 미학습 단어는 그대로
+            guard let lastReview = w.lastReviewedAt else { continue }
+
+            let level = min(max(w.srsLevel, 0), SRSService.maxLevel)
+            let days = intervals[level]
+
+            if days <= 0 {
+                // Lv.0 → 즉시 복습
+                w.nextReviewDate = .now
+            } else {
+                w.nextReviewDate = cal.date(byAdding: .day, value: days, to: lastReview) ?? .now
+            }
         }
         try? context.save()
         rebuildGameStats()
