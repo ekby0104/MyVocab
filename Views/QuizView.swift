@@ -668,10 +668,10 @@ struct QuizView: View {
         .buttonStyle(.plain)
     }
 
-    /// 다음 문제 버튼 (답 미선택 시 "건너뛰기"로 동작)
+    /// 다음 문제 버튼 (답 미선택 시 "포기하기"로 동작)
     private var nextButton: some View {
         Button { advance() } label: {
-            Text(selectedId == nil ? "건너뛰기" : "다음 문제")
+            Text(selectedId == nil ? "포기하기" : "다음 문제")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(selectedId == nil ? Theme.muted : Color(.systemBackground))
                 .frame(maxWidth: .infinity)
@@ -836,11 +836,14 @@ struct QuizView: View {
     }
 
     private func advance() {
-        // 답을 선택하지 않은 상태에서 버튼을 눌렀다면 오답 처리
+        // 답을 선택하지 않은 상태에서 "포기하기" 버튼을 눌렀다면
+        // 오답 처리만 하고 진행은 멈춤 (사용자가 정답 확인 후 "다음 문제" 다시 눌러야 진행)
         if selectedId == nil, let word = current {
+            // 정답을 선택된 것처럼 표시 (옵션에 ✓ 표시되도록)
             selectedId = word.id
             wrongCount += 1
             SRSService.wrong(word)
+            return
         }
 
         if index + 1 >= quizDeck.count {

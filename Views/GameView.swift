@@ -7,6 +7,7 @@ enum GameDestination: Hashable {
     case quiz
     case flashcard
     case matching
+    case recall
     case stats
 }
 
@@ -20,6 +21,8 @@ struct GameView: View {
     @State private var showClearAlert = false
     @State private var showResetWrongAlert = false
     @State private var showResetAllAlert = false
+    @State private var showResetSRSLevelAlert = false
+    @State private var showResetSRSDateAlert = false
 
     // 캐시된 값
     @State private var cachedDueCount: Int = 0
@@ -75,6 +78,7 @@ struct GameView: View {
                 case .quiz:      QuizView()
                 case .flashcard: FlashcardView()
                 case .matching:  MatchingGameView()
+                case .recall:    RecallView()
                 case .stats:     StatsView()
                 }
             }
@@ -95,6 +99,18 @@ struct GameView: View {
                 Button("초기화", role: .destructive) { resetAllLearning() }
             } message: {
                 Text("모든 단어의 정답·오답·SRS·틀린 상태가\n전부 초기화됩니다. 되돌릴 수 없습니다.")
+            }
+            .alert("SRS 레벨 초기화", isPresented: $showResetSRSLevelAlert) {
+                Button("취소", role: .cancel) {}
+                Button("초기화", role: .destructive) { resetAllSRSLevel() }
+            } message: {
+                Text("모든 단어의 SRS 레벨이 0으로 초기화됩니다.\n복습 일자와 정답·오답 기록은 유지됩니다.")
+            }
+            .alert("복습 일자 초기화", isPresented: $showResetSRSDateAlert) {
+                Button("취소", role: .cancel) {}
+                Button("초기화", role: .destructive) { resetAllSRSDate() }
+            } message: {
+                Text("모든 단어의 복습 일자가 지금으로 변경되어\n즉시 복습 대기열에 들어갑니다.\n레벨과 정답·오답 기록은 유지됩니다.")
             }
         }
     }
@@ -188,6 +204,9 @@ struct GameView: View {
             NavigationLink(value: GameDestination.matching) {
                 gameCard(emoji: "🔀", name: "매칭", sub: "4×4 카드 도전", meta: "30초")
             }.buttonStyle(.plain)
+            NavigationLink(value: GameDestination.recall) {
+                gameCard(emoji: "🧠", name: "회상 카드", sub: "스스로 평가", meta: "능동")
+            }.buttonStyle(.plain)
             NavigationLink(value: GameDestination.stats) {
                 gameCard(emoji: "📊", name: "통계", sub: "정답률 · TOP 오답", meta: "Stats")
             }.buttonStyle(.plain)
@@ -257,6 +276,24 @@ struct GameView: View {
                      sub: "오답 카운트 0으로",
                      disabled: !cachedHasAnyWrongCount) {
                 showResetWrongAlert = true
+            }
+
+            divider
+
+            adminRow(icon: "chart.bar",
+                     title: "SRS 레벨 초기화",
+                     sub: "모든 단어 Lv.0으로",
+                     disabled: allWords.isEmpty) {
+                showResetSRSLevelAlert = true
+            }
+
+            divider
+
+            adminRow(icon: "calendar.badge.clock",
+                     title: "복습 일자 초기화",
+                     sub: "전체 단어 즉시 복습 대기",
+                     disabled: allWords.isEmpty) {
+                showResetSRSDateAlert = true
             }
 
             divider
@@ -332,6 +369,27 @@ struct GameView: View {
             w.srsLevel = 0
             w.nextReviewDate = nil
             w.lastReviewedAt = nil
+        }
+        try? context.save()
+        rebuildGameStats()
+    }
+
+    /// 모든 단어의 SRS 레벨만 0으로 초기화
+    /// 복습 일자와 정답/오답 카운트는 유지
+    private func resetAllSRSLevel() {
+        for w in allWords where w.srsLevel > 0 {
+            w.srsLevel = 0
+        }
+        try? context.save()
+        rebuildGameStats()
+    }
+
+    /// 모든 단어의 복습 일자만 지금으로 변경 → 즉시 복습 대기
+    /// 레벨과 정답/오답 카운트는 유지
+    private func resetAllSRSDate() {
+        let now = Date()
+        for w in allWords {
+            w.nextReviewDate = now
         }
         try? context.save()
         rebuildGameStats()

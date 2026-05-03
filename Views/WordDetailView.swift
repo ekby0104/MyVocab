@@ -316,7 +316,7 @@ struct WordDetailView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if word.correctCount > 0 {
-                    smallButton(icon: "plus.circle", label: "정답 카운트 초기화") {
+                    smallButton(icon: "minus.circle", label: "정답 카운트 초기화") {
                         word.correctCount = 0
                         try? context.save()
                     }
