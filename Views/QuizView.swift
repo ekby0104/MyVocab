@@ -20,6 +20,7 @@ struct QuizView: View {
         case all       = "전체 단어"
         case favorites = "즐겨찾기"
         case wrongOnly = "틀린 단어"
+        case hard      = "어려움"
         case dueToday  = "오늘의 학습"
         case byLevel   = "레벨별"
         var id: String { rawValue }
@@ -29,6 +30,7 @@ struct QuizView: View {
             case .all:       return "books.vertical"
             case .favorites: return "star"
             case .wrongOnly: return "arrow.counterclockwise"
+            case .hard:      return "flame.fill"
             case .dueToday:  return "calendar"
             case .byLevel:   return "chart.bar"
             }
@@ -67,6 +69,7 @@ struct QuizView: View {
         case .all:       return base
         case .favorites: return base.filter(\.isFavorite)
         case .wrongOnly: return base.filter(\.isWrong)
+        case .hard:      return base.filter(\.isHard)
         case .dueToday:
             let now = Date()
             return base.filter { w in
@@ -86,6 +89,7 @@ struct QuizView: View {
             .all: base.count,
             .favorites: base.filter(\.isFavorite).count,
             .wrongOnly: base.filter(\.isWrong).count,
+            .hard: base.filter(\.isHard).count,
             .dueToday: base.filter { w in
                 if let next = w.nextReviewDate { return next <= now }
                 return true
@@ -97,10 +101,10 @@ struct QuizView: View {
     private var sourcePool: [Word] { wordsForSource(selectedSource) }
 
     /// 소스별 최소 필요 단어 수
-    /// - dueToday, byLevel: 1개 (다른 소스에서 오답 선택지 가져옴)
-    /// - 그 외: 6개 (6지선다 옵션 보장)
+    /// - all: 6개 (6지선다 옵션 보장)
+    /// - 그 외: 1개 (오답 선택지는 전체 단어에서 가져옴)
     private var minRequired: Int {
-        (selectedSource == .dueToday || selectedSource == .byLevel) ? 1 : 6
+        selectedSource == .all ? 6 : 1
     }
 
     /// 6지선다 오답 선택지 만들 수 있는지 (전체 단어 5개 이상 필요)
@@ -359,7 +363,8 @@ struct QuizView: View {
     private func disabledForSource(_ s: SourceType, count: Int) -> Bool {
         // byLevel은 항상 선택 가능 (선택 후 레벨 체크박스로 단어 추림)
         if s == .byLevel { return false }
-        let required = s == .dueToday ? 1 : 6
+        // dueToday, hard, wrongOnly, favorites는 1개 이상이면 가능 (오답 선택지는 전체에서)
+        let required = (s == .dueToday || s == .hard || s == .wrongOnly || s == .favorites) ? 1 : 6
         return count < required
     }
 

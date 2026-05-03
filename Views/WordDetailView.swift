@@ -199,6 +199,19 @@ struct WordDetailView: View {
                     .buttonStyle(.plain)
 
                     Button {
+                        word.isHard.toggle()
+                        try? context.save()
+                    } label: {
+                        Image(systemName: word.isHard ? "flame.fill" : "flame")
+                            .font(.system(size: 14))
+                            .foregroundStyle(word.isHard ? Theme.hard : Theme.ink)
+                            .frame(width: 34, height: 34)
+                            .background(Theme.chipBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
                         SpeechService.shared.speak(word.english)
                     } label: {
                         Image(systemName: "speaker.wave.2")

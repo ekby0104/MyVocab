@@ -29,6 +29,7 @@ enum Theme {
     static let correct:  Color = Color(red: 0.09, green: 0.51, blue: 0.36)  // #17825D
     static let wrong:    Color = Color(red: 0.90, green: 0.28, blue: 0.30)  // #E5484D
     static let link:     Color = Color(red: 0.23, green: 0.51, blue: 0.96)  // #3B82F6
+    static let hard:     Color = Color(red: 0.94, green: 0.42, blue: 0.07)  // #F06B12 - 불꽃 주황
 
     // MARK: - Radius
 
@@ -97,7 +98,7 @@ extension View {
 
 struct VocabChip: View {
     enum Kind {
-        case neutral, wrong, favorite, correct, info
+        case neutral, wrong, favorite, correct, info, hard
 
         var fg: Color {
             switch self {
@@ -106,6 +107,7 @@ struct VocabChip: View {
             case .favorite: return Color(red: 0.72, green: 0.53, blue: 0.10)
             case .correct:  return Theme.correct
             case .info:     return Theme.link
+            case .hard:     return Theme.hard
             }
         }
 
@@ -116,6 +118,7 @@ struct VocabChip: View {
             case .favorite: return Color(red: 1.0, green: 0.97, blue: 0.90)
             case .correct:  return Theme.correct.opacity(0.10)
             case .info:     return Theme.link.opacity(0.10)
+            case .hard:     return Theme.hard.opacity(0.10)
             }
         }
     }

@@ -144,7 +144,8 @@ struct WordListView: View {
                                         word: word,
                                         showMeaning: showMeaning,
                                         isLast: word.id == cachedList.last?.id,
-                                        onToggleFavorite: { toggleFavorite(word) }
+                                        onToggleFavorite: { toggleFavorite(word) },
+                                        onToggleHard: { toggleHard(word) }
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -155,6 +156,14 @@ struct WordListView: View {
                                         Label(
                                             word.isFavorite ? "즐겨찾기 해제" : "즐겨찾기",
                                             systemImage: word.isFavorite ? "star.slash" : "star"
+                                        )
+                                    }
+                                    Button {
+                                        toggleHard(word)
+                                    } label: {
+                                        Label(
+                                            word.isHard ? "어려움 해제" : "어려움 표시",
+                                            systemImage: word.isHard ? "flame.fill" : "flame"
                                         )
                                     }
                                     Button(role: .destructive) {
@@ -315,7 +324,13 @@ struct WordListView: View {
     private func toggleFavorite(_ word: Word) {
         word.isFavorite.toggle()
         try? context.save()
-        if filter == .favorite { rebuildList() }
+        rebuildList()
+    }
+
+    private func toggleHard(_ word: Word) {
+        word.isHard.toggle()
+        try? context.save()
+        rebuildList()
     }
 
     private func delete(_ word: Word) {
@@ -334,6 +349,8 @@ struct WordCardRow: View {
     var isLast: Bool = true
     /// 우측 별 아이콘 탭 시 호출되는 콜백 (즐겨찾기 토글).
     var onToggleFavorite: () -> Void = {}
+    /// 🔥 아이콘 탭 시 호출되는 콜백 (잘 안 외워지는 단어 토글).
+    var onToggleHard: () -> Void = {}
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -381,6 +398,20 @@ struct WordCardRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            // hard (잘 안 외워지는 단어) 토글
+            Button {
+                onToggleHard()
+            } label: {
+                Image(systemName: word.isHard ? "flame.fill" : "flame")
+                    .font(.system(size: 14))
+                    .foregroundStyle(word.isHard ? Theme.hard : Theme.line)
+                    .padding(.top, 1)
+                    .padding(.leading, 8)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+
             // star (우측) — 탭하면 즐겨찾기 토글 (NavigationLink 로의 전파는 차단됨)
             Button {
                 onToggleFavorite()
@@ -389,7 +420,7 @@ struct WordCardRow: View {
                     .font(.system(size: 14))
                     .foregroundStyle(word.isFavorite ? Theme.favorite : Theme.line)
                     .padding(.top, 1)
-                    .padding(.leading, 10)
+                    .padding(.leading, 8)
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
             }
@@ -419,6 +450,9 @@ struct WordCardRow: View {
         }
         if word.wrongCount > 0 {
             result.append(VocabChip(text: "✗ \(word.wrongCount)", kind: .wrong))
+        }
+        if word.isHard {
+            result.append(VocabChip(text: "🔥 어려움", kind: .hard))
         }
 //        if word.isFavorite {
 //            result.append(VocabChip(text: "즐겨찾기", kind: .favorite))

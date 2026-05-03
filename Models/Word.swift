@@ -17,6 +17,7 @@ final class Word {
     var wrongCount: Int
     var isFavorite: Bool
     var isWrong: Bool
+    var isHard: Bool = false  // 잘 안 외워지는 단어 (사용자가 직접 표시)
 
     // SRS (Spaced Repetition System)
     var srsLevel: Int            // 0~7, 높을수록 복습 간격 길어짐
@@ -37,6 +38,7 @@ final class Word {
         wrongCount: Int = 0,
         isFavorite: Bool = false,
         isWrong: Bool = false,
+        isHard: Bool = false,
         srsLevel: Int = 0,
         nextReviewDate: Date? = nil
     ) {
@@ -54,6 +56,7 @@ final class Word {
         self.wrongCount = wrongCount
         self.isFavorite = isFavorite
         self.isWrong = isWrong
+        self.isHard = isHard
         self.srsLevel = srsLevel
         self.nextReviewDate = nextReviewDate
     }

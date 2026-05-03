@@ -23,6 +23,8 @@ enum BackupService {
         // v2부터 추가 (이전 버전과 호환되도록 옵셔널)
         var srsLevel: Int?
         var nextReviewDate: Date?
+        // v3부터 추가
+        var isHard: Bool?
     }
 
     struct BackupFile: Codable {
@@ -31,7 +33,7 @@ enum BackupService {
         var words: [WordBackup]
     }
 
-    private static let currentVersion = 2
+    private static let currentVersion = 3
 
     // MARK: - Export
 
@@ -56,7 +58,8 @@ enum BackupService {
                 isFavorite: w.isFavorite,
                 isWrong: w.isWrong,
                 srsLevel: w.srsLevel,
-                nextReviewDate: w.nextReviewDate
+                nextReviewDate: w.nextReviewDate,
+                isHard: w.isHard
             )
         }
 
@@ -135,6 +138,10 @@ enum BackupService {
                 if backup.nextReviewDate != nil {
                     existingWord.nextReviewDate = backup.nextReviewDate
                 }
+                // v3부터 추가
+                if let isHard = backup.isHard {
+                    existingWord.isHard = isHard
+                }
                 restored += 1
             } else {
                 // 새 단어 추가
@@ -152,6 +159,7 @@ enum BackupService {
                     wrongCount: backup.wrongCount,
                     isFavorite: backup.isFavorite,
                     isWrong: backup.isWrong,
+                    isHard: backup.isHard ?? false,
                     srsLevel: backup.srsLevel ?? 0,
                     nextReviewDate: backup.nextReviewDate
                 )
