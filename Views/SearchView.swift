@@ -40,11 +40,12 @@ struct SearchView: View {
             case "*": regex += ".*"  // 0개 이상
             case "?": regex += "."   // 정확히 1개
             case ".", "(", ")", "[", "]", "{", "}", "^", "$", "|", "\\", "+":
-                regex += "\\\(ch)"
+                regex += "\\" + String(ch)
             default: regex += String(ch)
             }
         }
-        return try? NSRegularExpression(pattern: "^" + regex + "$", options: [.caseInsensitive])
+        // 부분 매칭 허용: 앵커(^, $)를 붙이지 않음 → 문자열 어디든 매칭
+        return try? NSRegularExpression(pattern: regex, options: [.caseInsensitive])
     }
 
     private func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
@@ -358,7 +359,7 @@ struct SearchView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 10)
+                .padding(.trailing, 5)
 
                 Button {
                     bulkToggleFavorite()
