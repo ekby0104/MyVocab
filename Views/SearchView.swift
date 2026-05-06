@@ -44,8 +44,16 @@ struct SearchView: View {
             default: regex += String(ch)
             }
         }
-        // 부분 매칭 허용: 앵커(^, $)를 붙이지 않음 → 문자열 어디든 매칭
-        return try? NSRegularExpression(pattern: regex, options: [.caseInsensitive])
+        // 사용자 의도대로 앵커 적용:
+        // - "sec*"  → "sec로 시작"  (앞 앵커, 뒤는 자유)
+        // - "*sec"  → "sec로 끝"    (뒤 앵커, 앞은 자유)
+        // - "*sec*" → "sec 포함"    (앵커 없음, * 가 양쪽에 있으니 자유롭게 매칭)
+        // - "s?c"   → "정확히 3글자, 가운데 한 글자"  (양쪽 앵커)
+        let startsWithStar = pattern.hasPrefix("*")
+        let endsWithStar = pattern.hasSuffix("*")
+        let prefix = startsWithStar ? "" : "^"
+        let suffix = endsWithStar ? "" : "$"
+        return try? NSRegularExpression(pattern: prefix + regex + suffix, options: [.caseInsensitive])
     }
 
     private func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
@@ -359,7 +367,7 @@ struct SearchView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 5)
+                .padding(.trailing, 10)
 
                 Button {
                     bulkToggleFavorite()
@@ -375,7 +383,7 @@ struct SearchView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 10)
             .padding(.bottom, 4)
 
             ScrollView {
