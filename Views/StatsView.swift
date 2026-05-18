@@ -112,7 +112,10 @@ struct StatsView: View {
         .navigationBarHidden(true)
         .onAppear { rebuildStats() }
         .sheet(item: $selectedLevel) { level in
-            LevelWordsView(level: level, allWords: allWords)
+            // 변경: allWords를 prop으로 통째로 넘기지 않는다.
+            // LevelWordsView가 자체 @Query로 가져오므로 sheet 재구성이 발생해도
+            // 1635개 배열을 매번 새로 복사해 주입할 필요가 없다.
+            LevelWordsView(level: level)
         }
     }
 
@@ -486,17 +489,28 @@ extension Int: @retroactive Identifiable {
 }
 
 // MARK: - Level Words View
+//
+// 최적화 포인트:
+// 1) computed property `words` → @State 캐시. 매 body 호출마다 1635개 filter+sort 하던 것 제거.
+// 2) chips를 부모(여기)에서 미리 계산해서 prop으로 전달 → 셀마다 dateComponents 호출 X.
+// 3) 즐겨찾기 토글 시 cachedRows의 해당 행 chips만 갱신 (정렬은 english 알파벳이라 위치 안 바뀜).
+// 4) SaveScheduler 로 디스크 write debounce.
+// 5) 부모(StatsView)에서 prop으로 allWords 통째로 받지 않고 자체 @Query 사용 — sheet 재구성 시
+//    매번 1635개 배열을 복사·주입하던 비용 제거.
 
 struct LevelWordsView: View {
     let level: Int
-    let allWords: [Word]
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
 
-    private var words: [Word] {
-        allWords.filter { $0.srsLevel == level }
-            .sorted { $0.english.lowercased() < $1.english.lowercased() }
-    }
+    /// 자체 @Query — StatsView로부터 prop을 받지 않음.
+    /// (StatsView가 sheet 재구성될 때마다 1635개 배열을 새로 주입하던 비용 제거)
+    @Query(sort: \Word.english) private var allWords: [Word]
+
+    /// 미리 계산된 행 캐시 — body 다시 그릴 때 1635개 filter+sort 다시 안 함.
+    @State private var cachedRows: [WordListView.RowVM] = []
 
     var body: some View {
         NavigationStack {
@@ -516,7 +530,7 @@ struct LevelWordsView: View {
 
                     Spacer()
 
-                    Text("Lv.\(level) · \(words.count)개")
+                    Text("Lv.\(level) · \(cachedRows.count)개")
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.ink)
 
@@ -536,17 +550,20 @@ struct LevelWordsView: View {
 
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(words.enumerated()), id: \.element.id) { idx, word in
-                            NavigationLink { WordDetailView(word: word) } label: {
-                                WordCardRow(word: word, showMeaning: true, isLast: idx == words.count - 1, onToggleFavorite: {
-                                    word.isFavorite.toggle()
-                                    try? context.save()
-                                })
+                        ForEach(Array(cachedRows.enumerated()), id: \.element.id) { idx, row in
+                            NavigationLink { WordDetailView(word: row.word) } label: {
+                                WordCardRow(
+                                    word: row.word,
+                                    chips: row.chips,
+                                    showMeaning: true,
+                                    isLast: idx == cachedRows.count - 1,
+                                    onToggleFavorite: { toggleFavorite(row.word) }
+                                )
                             }
                             .buttonStyle(.plain)
                         }
 
-                        if words.isEmpty {
+                        if cachedRows.isEmpty {
                             Text("레벨 \(level) 단어 없음")
                                 .font(.system(size: 12))
                                 .foregroundStyle(Theme.muted)
@@ -559,6 +576,83 @@ struct LevelWordsView: View {
             }
             .background(Theme.surface)
             .navigationBarHidden(true)
+            .onAppear { rebuildRows() }
+            // 단어 추가/삭제 / 다른 화면에서 srsLevel 변경 등 외부 변경 감지
+            .onChange(of: allWords.count) { rebuildRows() }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase != .active {
+                    SaveScheduler.shared.flush(context: context)
+                }
+            }
         }
+    }
+
+    /// 해당 레벨 단어만 추려서 chips까지 미리 계산해 캐시
+    private func rebuildRows() {
+        let now = Date()
+        let cal = Calendar.current
+        // @Query에 sort: \.english 가 걸려있으므로 추가 정렬 불필요.
+        // 메모리에서 1635개를 lowercased+sort 하던 작업이 사라짐.
+        cachedRows = allWords
+            .filter { $0.srsLevel == level }
+            .map { WordListView.RowVM(word: $0, chips: makeChips(for: $0, now: now, cal: cal)) }
+    }
+
+    /// 토글 후 해당 행의 chips만 갱신 (정렬은 영어 알파벳이라 위치 안 바뀜)
+    private func refreshChipsForRow(_ word: Word) {
+        guard let idx = cachedRows.firstIndex(where: { $0.word.persistentModelID == word.persistentModelID }) else { return }
+        let now = Date()
+        let cal = Calendar.current
+        cachedRows[idx] = WordListView.RowVM(word: word, chips: makeChips(for: word, now: now, cal: cal))
+    }
+
+    private func toggleFavorite(_ word: Word) {
+        word.isFavorite.toggle()
+        SaveScheduler.shared.scheduleSave(context: context)
+        // 정렬 키는 english라 즐겨찾기 토글로 위치가 바뀌지 않음 → 행 chips만 갱신
+        refreshChipsForRow(word)
+    }
+
+    // MARK: - chips 계산 (WordListView와 동일 로직)
+
+    private func makeChips(for word: Word, now: Date, cal: Calendar) -> [VocabChip] {
+        var result: [VocabChip] = []
+        if word.srsLevel >= 5 {
+            result.append(VocabChip(text: "Mastered · Lv.\(word.srsLevel)", kind: .neutral))
+        } else if word.lastReviewedAt == nil {
+            result.append(VocabChip(text: "NEW", kind: .correct))
+        } else if let info = dueInfo(for: word, now: now, cal: cal) {
+            result.append(VocabChip(text: info.label, kind: info.kind))
+        }
+        if word.wrongCount > 0 {
+            result.append(VocabChip(text: "✗ \(word.wrongCount)", kind: .wrong))
+        }
+        if word.isHard {
+            result.append(VocabChip(text: "🔥", kind: .hard))
+        }
+        return result
+    }
+
+    private func dueInfo(for word: Word, now: Date, cal: Calendar) -> (label: String, kind: VocabChip.Kind)? {
+        guard let next = word.nextReviewDate else { return nil }
+        if next <= now { return ("복습 가능", .correct) }
+
+        let startOfToday = cal.startOfDay(for: now)
+        let startOfDueDay = cal.startOfDay(for: next)
+        let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
+
+        if days == 0 {
+            let comps = cal.dateComponents([.hour, .minute], from: now, to: next)
+            let h = comps.hour ?? 0
+            let m = comps.minute ?? 0
+            let label: String
+            if h > 0 { label = "\(h)시간 \(m)분 후" }
+            else if m > 0 { label = "\(m)분 후" }
+            else { label = "곧 복습" }
+            return (label, .info)
+        }
+        if days == 1 { return ("내일", .favorite) }
+        if days < 7 { return ("\(days)일 후", .neutral) }
+        return ("\(days / 7)주 후", .neutral)
     }
 }

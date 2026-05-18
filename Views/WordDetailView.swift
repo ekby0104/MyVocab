@@ -34,6 +34,7 @@ struct WordDetailView: View {
                                 .foregroundStyle(Theme.ink)
                                 .lineSpacing(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
                         }
                     }
 
@@ -60,6 +61,7 @@ struct WordDetailView: View {
                                         .font(.system(size: 12))
                                         .foregroundStyle(Theme.muted)
                                         .lineSpacing(2)
+                                        .textSelection(.enabled)
                                 }
                             }
                         }
@@ -89,6 +91,11 @@ struct WordDetailView: View {
                             .padding(10)
                             .background(Theme.chipBg)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    
+                    // 영영 사전 (DictionarySection API)
+                    if !word.english.isEmpty {
+                        DictionarySection(word: word.english)
                     }
                 }
             }
@@ -181,6 +188,7 @@ struct WordDetailView: View {
                     .tracking(-0.5)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
+                    .textSelection(.enabled)
 
                 Spacer(minLength: 0)
 
@@ -383,6 +391,7 @@ struct WordDetailView: View {
                 .foregroundStyle(Theme.ink)
                 .lineSpacing(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         }
     }
 

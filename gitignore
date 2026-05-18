@@ -51,3 +51,7 @@ Icon?
 # Thumbnails
 Thumbs.db
 ehthumbs.db
+
+Assets.xcassets/.DS_Store
+.DS_Store
+

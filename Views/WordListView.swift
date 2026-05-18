@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 // MARK: - Filter
 
@@ -21,15 +22,24 @@ struct WordListView: View {
     /// 호출되는 콜백. .wrong 은 호출되지 않음.
     var onSelectMainFilter: (WordListFilter) -> Void = { _ in }
 
+    /// @Query가 이미 createdAt 역순으로 정렬해서 가져온다.
+    /// `.newest` 정렬일 때는 이 결과를 그대로 쓰고 메모리 재정렬을 생략한다.
     @Query(sort: \Word.createdAt, order: .reverse) private var words: [Word]
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var sortOrder: SortOrder = .newest
     @State private var showAdd = false
 
-    // 캐시된 정렬/필터 결과 — body 당 1회만 계산
-    @State private var cachedList: [Word] = []
+    // 캐시된 정렬/필터 결과 — body 당 1회만 계산.
+    // chips 까지 함께 캐시해서 셀 렌더링 시 Calendar.dateComponents 반복 호출을 막는다.
+    @State private var cachedList: [RowVM] = []
     @State private var cachedCount: Int = 0
+
+    /// 첫 paint 가 완료되었는지 (lazy 시작 최적화).
+    /// false 인 동안 ScrollView 자리에 가벼운 placeholder 만 표시 → 시작 paint 즉시 끝남.
+    /// true 가 되면 다음 런루프에 rebuildList() 가 한 번 돌아 cachedList 채워짐.
+    @State private var didInitialBuild: Bool = false
 
     // 뜻 보이기/숨기기
     @AppStorage("wordList.showMeaning") private var showMeaning: Bool = true
@@ -61,6 +71,13 @@ struct WordListView: View {
 
     // MARK: Derived
 
+    /// 행 표시용 VM (Word + 미리 계산된 chips)
+    struct RowVM: Identifiable {
+        let word: Word
+        let chips: [VocabChip]
+        var id: PersistentIdentifier { word.persistentModelID }
+    }
+
     private func rebuildList() {
         let base: [Word]
         switch filter {
@@ -68,21 +85,79 @@ struct WordListView: View {
         case .favorite: base = words.filter(\.isFavorite)
         case .wrong:    base = words.filter { $0.isWrong || $0.wrongCount > 0 }
         }
-        cachedList = sortWords(base)
+        let sorted = sortWords(base)
+        let now = Date()
+        let cal = Calendar.current
+        cachedList = sorted.map { RowVM(word: $0, chips: makeChips(for: $0, now: now, cal: cal)) }
         cachedCount = cachedList.count
     }
 
+    /// 정렬에 영향 없는 토글(즐겨찾기/어려움/삭제) 후 - 셀 chips만 갱신.
+    private func refreshChipsForRow(_ word: Word) {
+        guard let idx = cachedList.firstIndex(where: { $0.word.persistentModelID == word.persistentModelID }) else { return }
+        let now = Date()
+        let cal = Calendar.current
+        cachedList[idx] = RowVM(word: word, chips: makeChips(for: word, now: now, cal: cal))
+    }
+
+    /// 칩 계산 - 부모(rebuildList)에서 한 번만 수행
+    private func makeChips(for word: Word, now: Date, cal: Calendar) -> [VocabChip] {
+        var result: [VocabChip] = []
+        if word.srsLevel >= 5 {
+            result.append(VocabChip(text: "Mastered · Lv.\(word.srsLevel)", kind: .neutral))
+        } else if word.lastReviewedAt == nil {
+            result.append(VocabChip(text: "NEW", kind: .correct))
+        } else if let info = dueInfo(for: word, now: now, cal: cal) {
+            result.append(VocabChip(text: info.label, kind: info.kind))
+        }
+        if word.wrongCount > 0 {
+            result.append(VocabChip(text: "✗ \(word.wrongCount)", kind: .wrong))
+        }
+        if word.isHard {
+            result.append(VocabChip(text: "🔥", kind: .hard))
+        }
+        return result
+    }
+
+    private func dueInfo(for word: Word, now: Date, cal: Calendar) -> (label: String, kind: VocabChip.Kind)? {
+        guard let next = word.nextReviewDate else { return nil }
+        if next <= now { return ("복습 가능", .correct) }
+
+        let startOfToday = cal.startOfDay(for: now)
+        let startOfDueDay = cal.startOfDay(for: next)
+        let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
+
+        if days == 0 {
+            let comps = cal.dateComponents([.hour, .minute], from: now, to: next)
+            let h = comps.hour ?? 0
+            let m = comps.minute ?? 0
+            let label: String
+            if h > 0 { label = "\(h)시간 \(m)분 후" }
+            else if m > 0 { label = "\(m)분 후" }
+            else { label = "곧 복습" }
+            return (label, .info)
+        }
+        if days == 1 { return ("내일", .favorite) }
+        if days < 7 { return ("\(days)일 후", .neutral) }
+        return ("\(days / 7)주 후", .neutral)
+    }
+
     /// 복습 임박순 정렬 우선순위 (낮을수록 위)
-    /// 0: NEW, 1: 복습 가능, 2: 미래 예정
     private func duePriority(_ word: Word) -> Int {
         guard let next = word.nextReviewDate else { return 0 }   // NEW
         return next <= Date() ? 1 : 2
     }
 
     private func sortWords(_ list: [Word]) -> [Word] {
+        // 최적화: .newest 는 @Query 가 이미 정렬해서 줬으므로 재정렬 생략.
+        // base == words 인 경우(.all 필터)에는 그대로 반환.
+        if sortOrder == .newest {
+            return list
+        }
         var list = list
         switch sortOrder {
-        case .newest:       list.sort { $0.createdAt > $1.createdAt }
+        case .newest:
+            break  // 위에서 처리됨
         case .alphabet:     list.sort { $0.english.localizedCaseInsensitiveCompare($1.english) == .orderedAscending }
         case .alphabetDesc: list.sort { $0.english.localizedCaseInsensitiveCompare($1.english) == .orderedDescending }
         case .favorite:
@@ -102,15 +177,10 @@ struct WordListView: View {
                 return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
             }
         case .dueDate:
-            // 복습 임박순:
-            // 1. NEW (미학습, nextReviewDate == nil)
-            // 2. 복습 가능 (nextReviewDate <= now)
-            // 3. 가까운 미래 → 먼 미래 (오늘 중 → 내일 → ...)
             list.sort { lhs, rhs in
                 let lp = duePriority(lhs)
                 let rp = duePriority(rhs)
                 if lp != rp { return lp < rp }
-                // 같은 그룹 내 정렬
                 switch (lhs.nextReviewDate, rhs.nextReviewDate) {
                 case (nil, nil):
                     return lhs.english.localizedCaseInsensitiveCompare(rhs.english) == .orderedAscending
@@ -131,50 +201,52 @@ struct WordListView: View {
     var body: some View {
         NavigationStack(path: $wordListPath) {
             VStack(spacing: 0) {
-                // 상단: 타이틀 + 아이콘 버튼 (목업 .topbar)
                 topBar
-
-                // 세그먼트: 전체 / 즐겨찾기 / 틀린 단어 (목업 .segmented)
                 segmented
                     .padding(.horizontal, 20)
                     .padding(.bottom, 10)
 
-                // 리스트
-                if cachedList.isEmpty {
+                // 첫 paint 가 끝나기 전: 가벼운 placeholder.
+                // 첫 paint 끝난 직후 onAppear 에서 rebuildList() 를 다음 런루프로 미뤄 실행.
+                // 이로써 NavigationStack 자체는 즉시 표시되고, 1635개 chips 계산은 다음 프레임에서 처리.
+                if !didInitialBuild {
+                    initialPlaceholder
+                } else if cachedList.isEmpty {
                     emptyState
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(cachedList) { word in
-                                NavigationLink(value: word.persistentModelID) {
+                            ForEach(Array(cachedList.enumerated()), id: \.element.id) { idx, row in
+                                NavigationLink(value: row.word.persistentModelID) {
                                     WordCardRow(
-                                        word: word,
+                                        word: row.word,
+                                        chips: row.chips,
                                         showMeaning: showMeaning,
-                                        isLast: word.id == cachedList.last?.id,
-                                        onToggleFavorite: { toggleFavorite(word) },
-                                        onToggleHard: { toggleHard(word) }
+                                        isLast: idx == cachedList.count - 1,
+                                        onToggleFavorite: { toggleFavorite(row.word) },
+                                        onToggleHard: { toggleHard(row.word) }
                                     )
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
                                     Button {
-                                        toggleFavorite(word)
+                                        toggleFavorite(row.word)
                                     } label: {
                                         Label(
-                                            word.isFavorite ? "즐겨찾기 해제" : "즐겨찾기",
-                                            systemImage: word.isFavorite ? "star.slash" : "star"
+                                            row.word.isFavorite ? "즐겨찾기 해제" : "즐겨찾기",
+                                            systemImage: row.word.isFavorite ? "star.slash" : "star"
                                         )
                                     }
                                     Button {
-                                        toggleHard(word)
+                                        toggleHard(row.word)
                                     } label: {
                                         Label(
-                                            word.isHard ? "어려움 해제" : "어려움 표시",
-                                            systemImage: word.isHard ? "flame.fill" : "flame"
+                                            row.word.isHard ? "어려움 해제" : "어려움 표시",
+                                            systemImage: row.word.isHard ? "flame.fill" : "flame"
                                         )
                                     }
                                     Button(role: .destructive) {
-                                        delete(word)
+                                        delete(row.word)
                                     } label: {
                                         Label("삭제", systemImage: "trash")
                                     }
@@ -197,11 +269,45 @@ struct WordListView: View {
             .sheet(isPresented: $showAdd) {
                 WordEditView(mode: .add)
             }
-            .onAppear { rebuildList() }
-            .onChange(of: words.count) { rebuildList() }
-            .onChange(of: filter)      { rebuildList() }
-            .onChange(of: sortOrder)   { rebuildList() }
+            .onAppear {
+                // 첫 paint 후에만 rebuildList() 실행 — 시작 화면이 즉시 뜨도록.
+                if !didInitialBuild {
+                    // 다음 런루프로 미룸: 현재 paint 가 끝난 뒤 메인 큐에서 실행.
+                    DispatchQueue.main.async {
+                        rebuildList()
+                        didInitialBuild = true
+                    }
+                }
+            }
+            .onChange(of: words.count) {
+                // 단어 추가/삭제 시 즉시 재계산 (수가 바뀌었으니 placeholder 단계 아님)
+                if didInitialBuild { rebuildList() }
+            }
+            .onChange(of: filter) {
+                if didInitialBuild { rebuildList() }
+            }
+            .onChange(of: sortOrder) {
+                if didInitialBuild { rebuildList() }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase != .active {
+                    SaveScheduler.shared.flush(context: context)
+                }
+            }
         }
+    }
+
+    // MARK: - Initial placeholder (시작 시 첫 paint 를 즉시 끝내기 위한 가벼운 자리표시자)
+
+    private var initialPlaceholder: some View {
+        VStack {
+            Spacer()
+            ProgressView()
+                .controlSize(.small)
+                .tint(Theme.muted)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Top bar (목업 .topbar)
@@ -264,7 +370,6 @@ struct WordListView: View {
             ForEach(WordListFilter.allCases) { f in
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { filter = f }
-                    // .all / .favorite 세그먼트는 루트탭도 함께 전환. .wrong 은 로컬 필터만.
                     if f == .all || f == .favorite {
                         onSelectMainFilter(f)
                     }
@@ -327,23 +432,88 @@ struct WordListView: View {
     }
 
     // MARK: - Actions
+    //
+    // 최적화 포인트:
+    // 1) 정렬에 영향을 주는 sortOrder일 때만 전체 재정렬
+    // 2) 즐겨찾기 탭에서 즐겨찾기 해제하면 해당 행은 목록에서 제거
+    // 3) 그 외에는 cachedList의 해당 row만 chips 갱신
+    // 4) context.save()는 SaveScheduler에 위임 → 1초 debounce
 
     private func toggleFavorite(_ word: Word) {
         word.isFavorite.toggle()
-        try? context.save()
-        rebuildList()
+        SaveScheduler.shared.scheduleSave(context: context)
+
+        if filter == .favorite && !word.isFavorite {
+            cachedList.removeAll { $0.word.persistentModelID == word.persistentModelID }
+            cachedCount = cachedList.count
+            return
+        }
+        if sortOrder == .favorite {
+            rebuildList()
+            return
+        }
+        refreshChipsForRow(word)
     }
 
     private func toggleHard(_ word: Word) {
         word.isHard.toggle()
-        try? context.save()
-        rebuildList()
+        SaveScheduler.shared.scheduleSave(context: context)
+
+        if sortOrder == .hard {
+            rebuildList()
+            return
+        }
+        refreshChipsForRow(word)
     }
 
     private func delete(_ word: Word) {
         context.delete(word)
         try? context.save()
+        SaveScheduler.shared.cancel()
         rebuildList()
+    }
+}
+
+// MARK: - Save Scheduler
+//
+// 즐겨찾기/어려움 토글이 빠르게 연속될 때 매번 디스크에 쓰지 않도록 debounce.
+// - 1초 이내 추가 호출이 들어오면 타이머 reset
+// - 1초 정적 상태가 되면 한 번만 context.save()
+// - 백그라운드 진입 / 명시적 flush 시 즉시 저장
+@MainActor
+final class SaveScheduler {
+    static let shared = SaveScheduler()
+    private var workItem: DispatchWorkItem?
+    private weak var pendingContext: ModelContext?
+
+    private init() {}
+
+    func scheduleSave(context: ModelContext, delay: TimeInterval = 1.0) {
+        workItem?.cancel()
+        pendingContext = context
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.flush(context: context)
+        }
+        workItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func flush(context: ModelContext? = nil) {
+        workItem?.cancel()
+        workItem = nil
+        let ctx = context ?? pendingContext
+        if let ctx, ctx.hasChanges {
+            try? ctx.save()
+        }
+        pendingContext = nil
+    }
+
+    func cancel() {
+        workItem?.cancel()
+        workItem = nil
+        pendingContext = nil
     }
 }
 
@@ -352,18 +522,16 @@ struct WordListView: View {
 struct WordCardRow: View {
     @Environment(\.displayScale) private var displayScale
     let word: Word
+    /// 부모에서 미리 계산된 chips. 매 렌더링마다 Calendar 호출하지 않도록 prop으로 받는다.
+    var chips: [VocabChip]? = nil
     var showMeaning: Bool = true
     var isLast: Bool = true
-    /// 우측 별 아이콘 탭 시 호출되는 콜백 (즐겨찾기 토글).
     var onToggleFavorite: () -> Void = {}
-    /// 🔥 아이콘 탭 시 호출되는 콜백 (잘 안 외워지는 단어 토글).
     var onToggleHard: () -> Void = {}
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            // body
             VStack(alignment: .leading, spacing: 0) {
-                // en-row: en + pos (baseline, wrap)
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(word.english)
                         .font(.vocabTitle)
@@ -376,7 +544,6 @@ struct WordCardRow: View {
                     }
                 }
 
-                // pron
                 if !word.pronunciation.isEmpty {
                     Text(word.pronunciation)
                         .font(.vocabMuted)
@@ -384,7 +551,6 @@ struct WordCardRow: View {
                         .lineLimit(1)
                 }
 
-                // ko (뜻)
                 if showMeaning, !word.meaning.isEmpty {
                     Text(word.meaning)
                         .font(.vocabBody)
@@ -393,11 +559,11 @@ struct WordCardRow: View {
                         .padding(.top, 2)
                 }
 
-                // chips (ko 아래)
-                if !chips.isEmpty {
+                let resolvedChips = chips ?? fallbackChips
+                if !resolvedChips.isEmpty {
                     HStack(spacing: 4) {
-                        ForEach(chips.indices, id: \.self) { i in
-                            chips[i]
+                        ForEach(resolvedChips.indices, id: \.self) { i in
+                            resolvedChips[i]
                         }
                     }
                     .padding(.top, 4)
@@ -405,7 +571,6 @@ struct WordCardRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // hard (잘 안 외워지는 단어) 토글
             Button {
                 onToggleHard()
             } label: {
@@ -419,7 +584,6 @@ struct WordCardRow: View {
             }
             .buttonStyle(.borderless)
 
-            // star (우측) — 탭하면 즐겨찾기 토글 (NavigationLink 로의 전파는 차단됨)
             Button {
                 onToggleFavorite()
             } label: {
@@ -444,15 +608,14 @@ struct WordCardRow: View {
         .contentShape(Rectangle())
     }
 
-    /// 목업 칩 규칙 재현
-    private var chips: [VocabChip] {
+    /// chips가 prop으로 주어지지 않은 경우의 fallback (구버전 호환).
+    private var fallbackChips: [VocabChip] {
         var result: [VocabChip] = []
         if word.srsLevel >= 5 {
             result.append(VocabChip(text: "Mastered · Lv.\(word.srsLevel)", kind: .neutral))
         } else if word.lastReviewedAt == nil {
             result.append(VocabChip(text: "NEW", kind: .correct))
         } else if let info = dueInfo {
-            // 학습한 적 있고 마스터 레벨 미만 → 다음 복습일 표시
             result.append(VocabChip(text: info.label, kind: info.kind))
         }
         if word.wrongCount > 0 {
@@ -464,7 +627,6 @@ struct WordCardRow: View {
         return result
     }
 
-    /// 다음 복습일 정보 - 라벨과 칩 종류를 한 번에 계산
     private var dueInfo: (label: String, kind: VocabChip.Kind)? {
         guard let next = word.nextReviewDate else { return nil }
         let now = Date()
@@ -476,7 +638,6 @@ struct WordCardRow: View {
         let days = cal.dateComponents([.day], from: startOfToday, to: startOfDueDay).day ?? 0
 
         if days == 0 {
-            // 오늘 중 - 잔여 시간(시:분 또는 분 단위) 표시
             let comps = cal.dateComponents([.hour, .minute], from: now, to: next)
             let h = comps.hour ?? 0
             let m = comps.minute ?? 0
@@ -484,9 +645,9 @@ struct WordCardRow: View {
             if h > 0 { label = "\(h)시간 \(m)분 후" }
             else if m > 0 { label = "\(m)분 후" }
             else { label = "곧 복습" }
-            return (label, .info)  // 파란색
+            return (label, .info)
         }
-        if days == 1 { return ("내일", .favorite) }   // 노란색
+        if days == 1 { return ("내일", .favorite) }
         if days < 7 { return ("\(days)일 후", .neutral) }
         return ("\(days / 7)주 후", .neutral)
     }

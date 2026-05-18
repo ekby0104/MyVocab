@@ -516,7 +516,7 @@ private struct WrappingChips: View {
 
 // MARK: - FlowLayout (iOS 16+)
 
-private struct FlowLayout: Layout {
+struct FlowLayout: Layout {  // private 떼기
     var spacing: CGFloat = 6
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
