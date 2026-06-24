@@ -41,6 +41,10 @@ struct WordListView: View {
     /// true 가 되면 다음 런루프에 rebuildList() 가 한 번 돌아 cachedList 채워짐.
     @State private var didInitialBuild: Bool = false
 
+    /// rebuildList() 가 마지막으로 반영한 단어 수. words.count 변화 감지에서
+    /// 최초 빌드와 중복으로 다시 도는 것을 막기 위한 가드.
+    @State private var lastBuiltCount: Int = -1
+
     // 뜻 보이기/숨기기
     @AppStorage("wordList.showMeaning") private var showMeaning: Bool = true
 
@@ -90,6 +94,7 @@ struct WordListView: View {
         let cal = Calendar.current
         cachedList = sorted.map { RowVM(word: $0, chips: makeChips(for: $0, now: now, cal: cal)) }
         cachedCount = cachedList.count
+        lastBuiltCount = words.count
     }
 
     /// 정렬에 영향 없는 토글(즐겨찾기/어려움/삭제) 후 - 셀 chips만 갱신.
@@ -279,9 +284,13 @@ struct WordListView: View {
                     }
                 }
             }
-            .onChange(of: words.count) {
-                // 단어 추가/삭제 시 즉시 재계산 (수가 바뀌었으니 placeholder 단계 아님)
-                if didInitialBuild { rebuildList() }
+            // 첫 paint 전(!didInitialBuild)에는 words 를 읽지 않아 @Query fetch 가
+            // 첫 프레임을 막지 않도록 게이팅한다. didInitialBuild 가 true 가 된 뒤에만
+            // 실제 words.count 를 구독 → fetch 는 onAppear 의 다음 런루프(첫 paint 이후)에서 발생.
+            .onChange(of: didInitialBuild ? words.count : -1) { _, newValue in
+                // 단어 추가/삭제 시 즉시 재계산. 최초 빌드 직후의 중복 호출은 lastBuiltCount 로 차단.
+                guard didInitialBuild, newValue != lastBuiltCount else { return }
+                rebuildList()
             }
             .onChange(of: filter) {
                 if didInitialBuild { rebuildList() }

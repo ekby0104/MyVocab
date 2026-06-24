@@ -72,10 +72,12 @@ struct RootTabView: View {
                 .opacity(isWordTab ? 1 : 0)
                 .allowsHitTesting(isWordTab)
 
-                // 나머지 탭: 최초 선택 시에만 생성, 이후 opacity로 관리
+                // 검색·설정: 선택된 동안에만 mount → 비활성일 때 전체 테이블 @Query 가
+                // 저장마다 재fetch 되는 비용 제거 (재진입 시 1회만 fetch).
                 lazyTab(.search) { SearchView(resetTrigger: $searchResetTrigger, searchPath: $searchPath) }
-                lazyTab(.game)   { GameView(path: $gamePath) }
                 lazyTab(.settings) { SettingsView() }
+                // 게임: 퀴즈/플래시카드 진행 중 상태가 push 된 화면에 있으므로 mount 유지.
+                lazyTab(.game, keepAlive: true) { GameView(path: $gamePath) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -109,13 +111,23 @@ struct RootTabView: View {
         }
     }
 
-    /// 탭 내용이 최초 선택될 때만 생성되고 이후에는 opacity 로 관리되는 lazy 탭 헬퍼.
+    /// 탭 내용 생성 헬퍼.
+    /// - keepAlive == true: 최초 선택 시 생성 후 opacity 로 유지 (진행 중 상태 보존용 · 예: 게임)
+    /// - keepAlive == false: 선택된 동안에만 mount, 벗어나면 언마운트 (off-screen @Query 비용 제거)
     @ViewBuilder
-    private func lazyTab<Content: View>(_ tab: Tab, @ViewBuilder content: () -> Content) -> some View {
-        if appeared.contains(tab) {
+    private func lazyTab<Content: View>(
+        _ tab: Tab,
+        keepAlive: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if keepAlive {
+            if appeared.contains(tab) {
+                content()
+                    .opacity(selected == tab ? 1 : 0)
+                    .allowsHitTesting(selected == tab)
+            }
+        } else if selected == tab {
             content()
-                .opacity(selected == tab ? 1 : 0)
-                .allowsHitTesting(selected == tab)
         }
     }
 

@@ -22,6 +22,15 @@ struct SearchView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var hasAppeared = false
 
+    // 단어장에 없는 단어의 영영 사전 조회 (디바운스로 확정된 검색에서만 갱신)
+    @State private var dictionaryQuery: String = ""
+    @State private var showAddSheet = false
+
+    // 한글 뜻 자동 번역 (MyMemory EN→KO)
+    @State private var translationService = TranslationService()
+    @State private var translatedMeaning: String = ""
+    @State private var translationLoading = false
+
     enum SearchScope: String, CaseIterable, Identifiable {
         case all = "전체"
         case word = "단어"
@@ -71,9 +80,9 @@ struct SearchView: View {
 
     private func performSearch() {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { cachedResults = []; return }
+        guard !q.isEmpty else { cachedResults = []; dictionaryQuery = ""; return }
         if q.contains("*") || q.contains("?") {
-            guard let regex = wildcardRegex(from: q) else { cachedResults = []; return }
+            guard let regex = wildcardRegex(from: q) else { cachedResults = []; dictionaryQuery = ""; return }
             cachedResults = allWords.filter { searchFields(of: $0).contains { matches(regex, $0) } }
         } else {
             // 빠른 검색: localizedCaseInsensitiveContains 사용 (lowercased() 매 호출보다 빠름)
@@ -87,6 +96,16 @@ struct SearchView: View {
                 return false
             }
         }
+        // 결과가 없고 단일 영단어이면 영영 사전 조회 대상으로 확정
+        dictionaryQuery = cachedResults.isEmpty ? (englishDictionaryWord(from: q) ?? "") : ""
+    }
+
+    /// 와일드카드/공백/한글을 제외한 2글자 이상 단일 영단어만 사전 조회 대상으로 인정
+    private func englishDictionaryWord(from text: String) -> String? {
+        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { return nil }
+        let isEnglishOnly = q.allSatisfy { ("a"..."z").contains($0) || ("A"..."Z").contains($0) }
+        return isEnglishOnly ? q : nil
     }
 
     private func scheduleSearch() {
@@ -118,7 +137,11 @@ struct SearchView: View {
                 if query.isEmpty {
                     historySection
                 } else if cachedResults.isEmpty {
-                    emptyResults
+                    if dictionaryQuery.isEmpty {
+                        emptyResults
+                    } else {
+                        dictionaryLookup
+                    }
                 } else {
                     resultsList
                 }
@@ -135,9 +158,15 @@ struct SearchView: View {
                 scope = .all
                 queryFocused = false
                 cachedResults = []
+                dictionaryQuery = ""
             }
             .onChange(of: query) { scheduleSearch() }
             .onChange(of: scope) { performSearch() }
+            .onChange(of: dictionaryQuery) { _, newValue in
+                translatedMeaning = ""
+                guard !newValue.isEmpty else { translationLoading = false; return }
+                Task { await loadTranslation(newValue) }
+            }
             .onAppear {
                 if !hasAppeared {
                     hasAppeared = true
@@ -150,6 +179,13 @@ struct SearchView: View {
                 Button("확인") {}
             } message: {
                 Text(bulkMessage)
+            }
+            .sheet(isPresented: $showAddSheet, onDismiss: { performSearch() }) {
+                WordEditView(
+                    mode: .add,
+                    prefillEnglish: dictionaryQuery,
+                    prefillMeaning: translatedMeaning.isEmpty ? nil : translatedMeaning
+                )
             }
         }
     }
@@ -344,6 +380,75 @@ struct SearchView: View {
         .frame(maxWidth: .infinity)
     }
 
+    // MARK: - Dictionary lookup (단어장에 없는 영단어)
+
+    private var dictionaryLookup: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("단어장에 없는 단어예요")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .tracking(0.5)
+
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(dictionaryQuery)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(Theme.ink)
+                        Spacer()
+                        Button { showAddSheet = true } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text("단어장에 추가")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(Color(.systemBackground))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Theme.ink)
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // 한글 뜻 (MyMemory 번역, 추가 시 미리 채워짐)
+                    HStack(spacing: 6) {
+                        Text("뜻")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.muted)
+                            .tracking(0.4)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Theme.chipBg)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                        if translationLoading {
+                            ProgressView().scaleEffect(0.6)
+                        } else if !translatedMeaning.isEmpty {
+                            Text(translatedMeaning)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Theme.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text("번역 없음 · 직접 입력")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+                DictionarySection(word: dictionaryQuery)
+            }
+            .padding(.bottom, 20)
+        }
+        .scrollIndicators(.hidden)
+        .scrollDismissesKeyboard(.immediately)
+    }
+
     // MARK: - Results list
 
     private var resultsList: some View {
@@ -419,6 +524,22 @@ struct SearchView: View {
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.immediately)
+        }
+    }
+
+    // MARK: - Translation
+
+    private func loadTranslation(_ word: String) async {
+        translationLoading = true
+        defer { if word == dictionaryQuery { translationLoading = false } }
+        do {
+            let result = try await translationService.translate(word)
+            guard word == dictionaryQuery else { return }   // 검색어 바뀌면 결과 무시
+            translatedMeaning = result
+        } catch {
+            // 실패 시 조용히 비워둠 — 사용자가 직접 입력
+            guard word == dictionaryQuery else { return }
+            translatedMeaning = ""
         }
     }
 

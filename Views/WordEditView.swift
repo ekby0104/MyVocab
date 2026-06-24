@@ -10,6 +10,10 @@ struct WordEditView: View {
     }
 
     let mode: Mode
+    /// .add 모드에서 영어 단어를 미리 채울 때 사용 (사전 조회 → 단어장에 추가)
+    var prefillEnglish: String? = nil
+    /// .add 모드에서 한글 뜻을 미리 채울 때 사용 (번역 결과 프리필, 수정 가능)
+    var prefillMeaning: String? = nil
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -298,6 +302,13 @@ struct WordEditView: View {
             example = word.example
             exampleKo = word.exampleKo
             memo = word.memo
+        } else if case .add = mode {
+            if let prefill = prefillEnglish, english.isEmpty {
+                english = prefill
+            }
+            if let prefillM = prefillMeaning, meaning.isEmpty {
+                meaning = prefillM
+            }
         }
     }
 
@@ -306,9 +317,14 @@ struct WordEditView: View {
 
         switch mode {
         case .add:
-            let descriptor = FetchDescriptor<Word>()
-            let all = (try? context.fetch(descriptor)) ?? []
-            if all.contains(where: { $0.english.lowercased() == trimmedEnglish.lowercased() }) {
+            // 전체 1600개를 통째로 가져오는 대신, 입력어를 포함하는 후보만 fetch 후
+            // 정확한 대소문자 무시 일치만 중복으로 판정한다.
+            let lower = trimmedEnglish.lowercased()
+            let descriptor = FetchDescriptor<Word>(
+                predicate: #Predicate { $0.english.localizedStandardContains(trimmedEnglish) }
+            )
+            let candidates = (try? context.fetch(descriptor)) ?? []
+            if candidates.contains(where: { $0.english.lowercased() == lower }) {
                 showDuplicateAlert = true
                 return
             }
