@@ -17,6 +17,9 @@ struct FlashcardView: View {
     @AppStorage("flashcard.autoTTS") private var autoTTS: Bool = false
     /// 레벨별 학습 시 선택된 레벨들 (0~SRSService.maxLevel)
     @State private var selectedLevels: Set<Int> = []
+    @State private var cachedValidWords: [Word] = []
+    @State private var cachedSourceCounts: [SourceType: Int] = [:]
+    @State private var cachedLevelCounts: [Int: Int] = [:]
 
     enum SourceType: String, CaseIterable, Identifiable {
         case all       = "전체 단어"
@@ -44,19 +47,12 @@ struct FlashcardView: View {
         return deck[index]
     }
 
-    /// 유효한 단어들 (한 번만 계산)
-    private var validWords: [Word] {
-        allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
-    }
+    /// 유효한 단어들 (화면 갱신마다 다시 필터링하지 않도록 캐시)
+    private var validWords: [Word] { cachedValidWords }
 
-    /// 레벨별 단어 수
-    private var levelCounts: [Int: Int] {
-        var counts: [Int: Int] = [:]
-        for w in validWords {
-            counts[w.srsLevel, default: 0] += 1
-        }
-        return counts
-    }
+    private var levelCounts: [Int: Int] { cachedLevelCounts }
+
+    private var sourceCounts: [SourceType: Int] { cachedSourceCounts }
 
     private func wordsForSource(_ source: SourceType) -> [Word] {
         let base = validWords
@@ -74,6 +70,39 @@ struct FlashcardView: View {
         case .byLevel:
             return base.filter { selectedLevels.contains($0.srsLevel) }
         }
+    }
+
+    private func rebuildStudyCache() {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let now = Date()
+        var allCount = 0
+        var favCount = 0
+        var wrongCount = 0
+        var hardCount = 0
+        var dueCount = 0
+        var byLevelCount = 0
+        var levelCounts: [Int: Int] = [:]
+
+        for w in base {
+            allCount += 1
+            if w.isFavorite { favCount += 1 }
+            if w.isWrong { wrongCount += 1 }
+            if w.isHard { hardCount += 1 }
+            if let next = w.nextReviewDate { if next <= now { dueCount += 1 } } else { dueCount += 1 }
+            if selectedLevels.contains(w.srsLevel) { byLevelCount += 1 }
+            levelCounts[w.srsLevel, default: 0] += 1
+        }
+
+        cachedValidWords = base
+        cachedLevelCounts = levelCounts
+        cachedSourceCounts = [
+            .all: allCount,
+            .favorites: favCount,
+            .wrongOnly: wrongCount,
+            .hard: hardCount,
+            .dueToday: dueCount,
+            .byLevel: byLevelCount
+        ]
     }
 
     /// 레벨 체크박스 그룹 (byLevel 소스 선택 시 노출)
@@ -168,6 +197,12 @@ struct FlashcardView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
+        .onAppear { rebuildStudyCache() }
+        .onChange(of: allWords.count) { _, _ in rebuildStudyCache() }
+        .onChange(of: selectedLevels) { _, _ in rebuildStudyCache() }
+        .onChange(of: started) { _, newValue in
+            if !newValue { rebuildStudyCache() }
+        }
     }
 
     // MARK: - Top bars
@@ -241,7 +276,7 @@ struct FlashcardView: View {
 
                 VStack(spacing: 8) {
                     ForEach(SourceType.allCases) { source in
-                        let count = wordsForSource(source).count
+                        let count = sourceCounts[source] ?? 0
                         Button {
                             selectedSource = source
                         } label: {
@@ -297,8 +332,8 @@ struct FlashcardView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
-                    .disabled(wordsForSource(selectedSource).isEmpty)
-                    .opacity(wordsForSource(selectedSource).isEmpty ? 0.4 : 1)
+                    .disabled((sourceCounts[selectedSource] ?? 0) == 0)
+                    .opacity((sourceCounts[selectedSource] ?? 0) == 0 ? 0.4 : 1)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 4)

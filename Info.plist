@@ -33,7 +33,7 @@
 			</array>
 		</dict>
 	</array>
-	<key>UILaunchScreen</key>
-	<dict/>
-</dict>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	</dict>
 </plist>

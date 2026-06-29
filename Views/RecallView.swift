@@ -21,6 +21,9 @@ struct RecallView: View {
     @State private var selectedLevels: Set<Int> = []
     @State private var started = false
     @State private var showAnswer = false
+    @State private var cachedValidWords: [Word] = []
+    @State private var cachedSourceCounts: [SourceType: Int] = [:]
+    @State private var cachedLevelCounts: [Int: Int] = [:]
 
     @State private var deck: [Word] = []
     @State private var index: Int = 0
@@ -54,19 +57,12 @@ struct RecallView: View {
         return deck[index]
     }
 
-    /// 유효한 단어들 (한 번만 계산)
-    private var validWords: [Word] {
-        allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
-    }
+    /// 유효한 단어들 (화면 갱신마다 다시 필터링하지 않도록 캐시)
+    private var validWords: [Word] { cachedValidWords }
 
-    /// 레벨별 단어 수
-    private var levelCounts: [Int: Int] {
-        var counts: [Int: Int] = [:]
-        for w in validWords {
-            counts[w.srsLevel, default: 0] += 1
-        }
-        return counts
-    }
+    private var levelCounts: [Int: Int] { cachedLevelCounts }
+
+    private var sourceCounts: [SourceType: Int] { cachedSourceCounts }
 
     private func wordsForSource(_ source: SourceType) -> [Word] {
         let base = validWords
@@ -86,6 +82,39 @@ struct RecallView: View {
         }
     }
 
+    private func rebuildStudyCache() {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
+        let now = Date()
+        var allCount = 0
+        var favCount = 0
+        var wrongCount = 0
+        var hardCount = 0
+        var dueCount = 0
+        var byLevelCount = 0
+        var levelCounts: [Int: Int] = [:]
+
+        for w in base {
+            allCount += 1
+            if w.isFavorite { favCount += 1 }
+            if w.isWrong { wrongCount += 1 }
+            if w.isHard { hardCount += 1 }
+            if let next = w.nextReviewDate { if next <= now { dueCount += 1 } } else { dueCount += 1 }
+            if selectedLevels.contains(w.srsLevel) { byLevelCount += 1 }
+            levelCounts[w.srsLevel, default: 0] += 1
+        }
+
+        cachedValidWords = base
+        cachedLevelCounts = levelCounts
+        cachedSourceCounts = [
+            .all: allCount,
+            .favorites: favCount,
+            .wrongOnly: wrongCount,
+            .hard: hardCount,
+            .dueToday: dueCount,
+            .byLevel: byLevelCount
+        ]
+    }
+
     var body: some View {
         Group {
             if started {
@@ -96,6 +125,12 @@ struct RecallView: View {
         }
         .background(Theme.surface.ignoresSafeArea())
         .navigationBarHidden(true)
+        .onAppear { rebuildStudyCache() }
+        .onChange(of: allWords.count) { _, _ in rebuildStudyCache() }
+        .onChange(of: selectedLevels) { _, _ in rebuildStudyCache() }
+        .onChange(of: started) { _, newValue in
+            if !newValue { rebuildStudyCache() }
+        }
     }
 
     // MARK: - Start Screen
@@ -144,11 +179,11 @@ struct RecallView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
-                    .disabled(wordsForSource(selectedSource).isEmpty)
-                    .opacity(wordsForSource(selectedSource).isEmpty ? 0.4 : 1)
+                    .disabled((sourceCounts[selectedSource] ?? 0) == 0)
+                    .opacity((sourceCounts[selectedSource] ?? 0) == 0 ? 0.4 : 1)
                     .padding(.horizontal, 20)
 
-                    if wordsForSource(selectedSource).isEmpty {
+                    if (sourceCounts[selectedSource] ?? 0) == 0 {
                         Text(selectedSource == .dueToday
                              ? "오늘 학습할 단어가 없습니다"
                              : "단어가 없습니다")
@@ -165,7 +200,7 @@ struct RecallView: View {
     }
 
     private func sourceRow(_ s: SourceType) -> some View {
-        let count = wordsForSource(s).count
+        let count = sourceCounts[s] ?? 0
         let isSelected = selectedSource == s
         let disabled = (s != .byLevel) && count == 0
         return Button {

@@ -40,21 +40,28 @@ struct MyVocabApp: App {
     // MARK: - 파일 공유로 들어온 경우
 
     private func handleIncomingFile(_ url: URL) {
-        let accessed = url.startAccessingSecurityScopedResource()
-        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-
-        do {
-            let data = try Data(contentsOf: url)
-            let context = sharedModelContainer.mainContext
-            let result = try NaverImporter.importJSON(data: data, context: context)
-            let msg = "추가 \(result.inserted)개 · 건너뜀 \(result.skipped)개"
-            NotificationCenter.default.post(name: .vocabImported, object: msg)
-        } catch {
-            NotificationCenter.default.post(
-                name: .vocabImported,
-                object: "불러오기 실패: \(error.localizedDescription)"
-            )
+        Task { @MainActor in
+            do {
+                let data = try await readSecurityScopedData(from: url)
+                let context = sharedModelContainer.mainContext
+                let result = try NaverImporter.importJSON(data: data, context: context)
+                let msg = "추가 \(result.inserted)개 · 건너뜀 \(result.skipped)개"
+                NotificationCenter.default.post(name: .vocabImported, object: msg)
+            } catch {
+                NotificationCenter.default.post(
+                    name: .vocabImported,
+                    object: "불러오기 실패: \(error.localizedDescription)"
+                )
+            }
         }
+    }
+
+    private func readSecurityScopedData(from url: URL) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            return try Data(contentsOf: url)
+        }.value
     }
 
     // MARK: - myvocab:// 스킴 (단축어에서 호출)

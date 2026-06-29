@@ -610,15 +610,26 @@ struct SettingsView: View {
             let urls = try result.get()
             guard let url = urls.first else { return }
 
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-
-            let data = try Data(contentsOf: url)
-            let res = try NaverImporter.importJSON(data: data, context: context)
-            lastResult = res
+            Task { @MainActor in
+                do {
+                    let data = try await readSecurityScopedData(from: url)
+                    let res = try NaverImporter.importJSON(data: data, context: context)
+                    lastResult = res
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func readSecurityScopedData(from url: URL) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            return try Data(contentsOf: url)
+        }.value
     }
 
     private func backupNow() {
@@ -635,13 +646,17 @@ struct SettingsView: View {
             let urls = try result.get()
             guard let url = urls.first else { return }
 
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-
-            let data = try Data(contentsOf: url)
-            let res = try BackupService.restore(data: data, context: context, replaceAll: false)
-            backupAlertMessage = "복원 완료: \(res.restored)개 단어"
-            showBackupAlert = true
+            Task { @MainActor in
+                do {
+                    let data = try await readSecurityScopedData(from: url)
+                    let res = try BackupService.restore(data: data, context: context, replaceAll: false)
+                    backupAlertMessage = "복원 완료: \(res.restored)개 단어"
+                    showBackupAlert = true
+                } catch {
+                    backupAlertMessage = "복원 실패: \(error.localizedDescription)"
+                    showBackupAlert = true
+                }
+            }
         } catch {
             backupAlertMessage = "복원 실패: \(error.localizedDescription)"
             showBackupAlert = true

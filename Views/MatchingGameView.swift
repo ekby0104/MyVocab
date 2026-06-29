@@ -14,6 +14,9 @@ struct MatchingGameView: View {
     @State private var selectedSource: SourceType = .dueToday
     /// 레벨별 학습 시 선택된 레벨들 (0~SRSService.maxLevel)
     @State private var selectedLevels: Set<Int> = []
+    @State private var cachedValidWords: [Word] = []
+    @State private var cachedSourceCounts: [SourceType: Int] = [:]
+    @State private var cachedLevelCounts: [Int: Int] = [:]
 
     // 게임 상태
     @State private var started = false
@@ -68,19 +71,10 @@ struct MatchingGameView: View {
         }
     }
 
-    /// 유효한 단어들 (한 번만 계산)
-    private var validWords: [Word] {
-        allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
-    }
+    /// 유효한 단어들 (화면 갱신마다 다시 필터링하지 않도록 캐시)
+    private var validWords: [Word] { cachedValidWords }
 
-    /// 레벨별 단어 수
-    private var levelCounts: [Int: Int] {
-        var counts: [Int: Int] = [:]
-        for w in validWords {
-            counts[w.srsLevel, default: 0] += 1
-        }
-        return counts
-    }
+    private var levelCounts: [Int: Int] { cachedLevelCounts }
 
     private func wordsForSource(_ source: SourceType) -> [Word] {
         let base = validWords
@@ -100,9 +94,10 @@ struct MatchingGameView: View {
         }
     }
 
-    // 캐싱: 단일 순회로 모든 소스 카운트 계산
-    private var sourceCounts: [SourceType: Int] {
-        let base = validWords
+    private var sourceCounts: [SourceType: Int] { cachedSourceCounts }
+
+    private func rebuildStudyCache() {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
         let now = Date()
         var allCount = 0
         var favCount = 0
@@ -110,6 +105,8 @@ struct MatchingGameView: View {
         var hardCount = 0
         var dueCount = 0
         var byLevelCount = 0
+        var levelCounts: [Int: Int] = [:]
+
         for w in base {
             allCount += 1
             if w.isFavorite { favCount += 1 }
@@ -117,8 +114,12 @@ struct MatchingGameView: View {
             if w.isHard { hardCount += 1 }
             if let next = w.nextReviewDate { if next <= now { dueCount += 1 } } else { dueCount += 1 }
             if selectedLevels.contains(w.srsLevel) { byLevelCount += 1 }
+            levelCounts[w.srsLevel, default: 0] += 1
         }
-        return [
+
+        cachedValidWords = base
+        cachedLevelCounts = levelCounts
+        cachedSourceCounts = [
             .all: allCount,
             .favorites: favCount,
             .wrongOnly: wrongCount,
@@ -158,6 +159,12 @@ struct MatchingGameView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
+        .onAppear { rebuildStudyCache() }
+        .onChange(of: allWords.count) { _, _ in rebuildStudyCache() }
+        .onChange(of: selectedLevels) { _, _ in rebuildStudyCache() }
+        .onChange(of: started) { _, newValue in
+            if !newValue { rebuildStudyCache() }
+        }
         .onDisappear { stopTimer() }
         .sheet(item: $selectedWord) { word in
             NavigationStack {

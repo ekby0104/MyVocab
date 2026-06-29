@@ -15,6 +15,9 @@ struct QuizView: View {
     @State private var started = false
     /// 레벨별 학습 시 선택된 레벨들 (0~SRSService.maxLevel)
     @State private var selectedLevels: Set<Int> = []
+    @State private var cachedValidWords: [Word] = []
+    @State private var cachedSourceCounts: [SourceType: Int] = [:]
+    @State private var cachedLevelCounts: [Int: Int] = [:]
 
     enum SourceType: String, CaseIterable, Identifiable {
         case all       = "전체 단어"
@@ -63,10 +66,8 @@ struct QuizView: View {
         return quizDeck[index]
     }
 
-    /// 유효한 단어들 (영어/뜻이 비어있지 않은 단어) - 한 번만 계산하고 재사용
-    private var validWords: [Word] {
-        allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
-    }
+    /// 유효한 단어들 (영어/뜻이 비어있지 않은 단어) - 화면 갱신마다 다시 필터링하지 않도록 캐시
+    private var validWords: [Word] { cachedValidWords }
 
     private func wordsForSource(_ source: SourceType) -> [Word] {
         wordsForSource(source, base: validWords)
@@ -89,17 +90,21 @@ struct QuizView: View {
         }
     }
 
-    // 캐싱: 시작 화면에서 반복 필터링 방지 - validWords를 한 번만 계산해서 재사용
-    private var sourceCounts: [SourceType: Int] {
-        let base = validWords
+    private var sourceCounts: [SourceType: Int] { cachedSourceCounts }
+
+    private var levelCounts: [Int: Int] { cachedLevelCounts }
+
+    private func rebuildStudyCache() {
+        let base = allWords.filter { !$0.english.isEmpty && !$0.meaning.isEmpty }
         let now = Date()
-        // 한 번 순회로 모든 카운트 계산 (filter 6번 → 단일 순회)
         var allCount = 0
         var favCount = 0
         var wrongCount = 0
         var hardCount = 0
         var dueCount = 0
         var byLevelCount = 0
+        var levelCounts: [Int: Int] = [:]
+
         for w in base {
             allCount += 1
             if w.isFavorite { favCount += 1 }
@@ -107,8 +112,12 @@ struct QuizView: View {
             if w.isHard { hardCount += 1 }
             if let next = w.nextReviewDate { if next <= now { dueCount += 1 } } else { dueCount += 1 }
             if selectedLevels.contains(w.srsLevel) { byLevelCount += 1 }
+            levelCounts[w.srsLevel, default: 0] += 1
         }
-        return [
+
+        cachedValidWords = base
+        cachedLevelCounts = levelCounts
+        cachedSourceCounts = [
             .all: allCount,
             .favorites: favCount,
             .wrongOnly: wrongCount,
@@ -129,7 +138,7 @@ struct QuizView: View {
 
     /// 6지선다 오답 선택지 만들 수 있는지 (전체 단어 5개 이상 필요)
     private var canMakeDistractors: Bool {
-        validWords.count >= 6
+        cachedValidWords.count >= 6
     }
 
     var body: some View {
@@ -147,6 +156,12 @@ struct QuizView: View {
         }
         .background(Theme.surface)
         .navigationBarHidden(true)
+        .onAppear { rebuildStudyCache() }
+        .onChange(of: allWords.count) { _, _ in rebuildStudyCache() }
+        .onChange(of: selectedLevels) { _, _ in rebuildStudyCache() }
+        .onChange(of: started) { _, newValue in
+            if !newValue { rebuildStudyCache() }
+        }
     }
 
     // MARK: - Top bars
@@ -290,7 +305,7 @@ struct QuizView: View {
                 GridItem(.flexible(), spacing: 6),
                 GridItem(.flexible(), spacing: 6)
             ], spacing: 6) {
-                let counts = levelCounts  // 한 번만 계산
+                let counts = levelCounts
                 ForEach(0...SRSService.maxLevel, id: \.self) { lv in
                     levelChip(lv, count: counts[lv] ?? 0)
                 }
@@ -304,15 +319,6 @@ struct QuizView: View {
                 .stroke(Theme.line, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    /// 레벨별 단어 수 (한 번만 계산)
-    private var levelCounts: [Int: Int] {
-        var counts: [Int: Int] = [:]
-        for w in validWords {
-            counts[w.srsLevel, default: 0] += 1
-        }
-        return counts
     }
 
     private func levelChip(_ lv: Int, count: Int) -> some View {

@@ -10,7 +10,6 @@ struct SearchView: View {
     @State private var query: String = ""
     @FocusState private var queryFocused: Bool
     @State private var scope: SearchScope = .all
-    @Query private var allWords: [Word]
 
     @State private var showBulkAlert = false
     @State private var bulkMessage = ""
@@ -19,6 +18,7 @@ struct SearchView: View {
 
     // 캐시된 검색 결과
     @State private var cachedResults: [Word] = []
+    @State private var cachedResultsByID: [PersistentIdentifier: Word] = [:]
     @State private var searchTask: Task<Void, Never>?
     @State private var hasAppeared = false
 
@@ -27,7 +27,7 @@ struct SearchView: View {
     @State private var showAddSheet = false
 
     // 한글 뜻 자동 번역 (MyMemory EN→KO)
-    @State private var translationService = TranslationService()
+    private let translationService = TranslationService.shared
     @State private var translatedMeaning: String = ""
     @State private var translationLoading = false
 
@@ -80,24 +80,61 @@ struct SearchView: View {
 
     private func performSearch() {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { cachedResults = []; dictionaryQuery = ""; return }
-        if q.contains("*") || q.contains("?") {
-            guard let regex = wildcardRegex(from: q) else { cachedResults = []; dictionaryQuery = ""; return }
-            cachedResults = allWords.filter { searchFields(of: $0).contains { matches(regex, $0) } }
-        } else {
-            // 빠른 검색: localizedCaseInsensitiveContains 사용 (lowercased() 매 호출보다 빠름)
-            cachedResults = allWords.filter { word in
-                let fields = searchFields(of: word)
-                for field in fields {
-                    if field.localizedCaseInsensitiveContains(q) {
-                        return true
-                    }
-                }
-                return false
-            }
+        guard !q.isEmpty else {
+            cachedResults = []
+            cachedResultsByID = [:]
+            dictionaryQuery = ""
+            return
         }
+        let candidates = fetchSearchCandidates(for: q)
+        if q.contains("*") || q.contains("?") {
+            guard let regex = wildcardRegex(from: q) else {
+                cachedResults = []
+                cachedResultsByID = [:]
+                dictionaryQuery = ""
+                return
+            }
+            cachedResults = candidates.filter { searchFields(of: $0).contains { matches(regex, $0) } }
+        } else {
+            cachedResults = candidates
+        }
+        cachedResultsByID = Dictionary(uniqueKeysWithValues: cachedResults.map { ($0.persistentModelID, $0) })
         // 결과가 없고 단일 영단어이면 영영 사전 조회 대상으로 확정
         dictionaryQuery = cachedResults.isEmpty ? (englishDictionaryWord(from: q) ?? "") : ""
+    }
+
+    private func fetchSearchCandidates(for q: String) -> [Word] {
+        if q.contains("*") || q.contains("?") {
+            return (try? context.fetch(FetchDescriptor<Word>())) ?? []
+        }
+
+        let descriptor: FetchDescriptor<Word>
+        switch scope {
+        case .all:
+            descriptor = FetchDescriptor<Word>(
+                predicate: #Predicate { word in
+                    word.english.localizedStandardContains(q) ||
+                    word.meaning.localizedStandardContains(q) ||
+                    word.example.localizedStandardContains(q) ||
+                    word.exampleKo.localizedStandardContains(q)
+                }
+            )
+        case .word:
+            descriptor = FetchDescriptor<Word>(
+                predicate: #Predicate { word in
+                    word.english.localizedStandardContains(q) ||
+                    word.meaning.localizedStandardContains(q)
+                }
+            )
+        case .example:
+            descriptor = FetchDescriptor<Word>(
+                predicate: #Predicate { word in
+                    word.example.localizedStandardContains(q) ||
+                    word.exampleKo.localizedStandardContains(q)
+                }
+            )
+        }
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     /// 와일드카드/공백/한글을 제외한 2글자 이상 단일 영단어만 사전 조회 대상으로 인정
@@ -149,7 +186,7 @@ struct SearchView: View {
             .background(Theme.surface)
             .navigationBarHidden(true)
             .navigationDestination(for: PersistentIdentifier.self) { id in
-                if let word = allWords.first(where: { $0.persistentModelID == id }) {
+                if let word = cachedResultsByID[id] {
                     WordDetailView(word: word)
                 }
             }
@@ -158,6 +195,7 @@ struct SearchView: View {
                 scope = .all
                 queryFocused = false
                 cachedResults = []
+                cachedResultsByID = [:]
                 dictionaryQuery = ""
             }
             .onChange(of: query) { scheduleSearch() }
@@ -547,14 +585,18 @@ struct SearchView: View {
 
     private func toggleFavorite(_ word: Word) {
         word.isFavorite.toggle(); try? context.save()
+        cachedResultsByID[word.persistentModelID] = word
     }
 
     private func toggleHard(_ word: Word) {
         word.isHard.toggle(); try? context.save()
+        cachedResultsByID[word.persistentModelID] = word
     }
 
     private func delete(_ word: Word) {
         context.delete(word); try? context.save()
+        cachedResults.removeAll { $0.persistentModelID == word.persistentModelID }
+        cachedResultsByID.removeValue(forKey: word.persistentModelID)
     }
 
     private func bulkToggleFavorite() {

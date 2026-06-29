@@ -22,18 +22,17 @@ struct WordListView: View {
     /// 호출되는 콜백. .wrong 은 호출되지 않음.
     var onSelectMainFilter: (WordListFilter) -> Void = { _ in }
 
-    /// @Query가 이미 createdAt 역순으로 정렬해서 가져온다.
-    /// `.newest` 정렬일 때는 이 결과를 그대로 쓰고 메모리 재정렬을 생략한다.
-    @Query(sort: \Word.createdAt, order: .reverse) private var words: [Word]
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
 
+    @State private var words: [Word] = []
     @State private var sortOrder: SortOrder = .newest
     @State private var showAdd = false
 
     // 캐시된 정렬/필터 결과 — body 당 1회만 계산.
     // chips 까지 함께 캐시해서 셀 렌더링 시 Calendar.dateComponents 반복 호출을 막는다.
     @State private var cachedList: [RowVM] = []
+    @State private var cachedWordsByID: [PersistentIdentifier: Word] = [:]
     @State private var cachedCount: Int = 0
 
     /// 첫 paint 가 완료되었는지 (lazy 시작 최적화).
@@ -82,6 +81,13 @@ struct WordListView: View {
         var id: PersistentIdentifier { word.persistentModelID }
     }
 
+    private func fetchWords() {
+        let descriptor = FetchDescriptor<Word>(
+            sortBy: [SortDescriptor(\Word.createdAt, order: .reverse)]
+        )
+        words = (try? context.fetch(descriptor)) ?? []
+    }
+
     private func rebuildList() {
         let base: [Word]
         switch filter {
@@ -93,6 +99,7 @@ struct WordListView: View {
         let now = Date()
         let cal = Calendar.current
         cachedList = sorted.map { RowVM(word: $0, chips: makeChips(for: $0, now: now, cal: cal)) }
+        cachedWordsByID = Dictionary(uniqueKeysWithValues: cachedList.map { ($0.word.persistentModelID, $0.word) })
         cachedCount = cachedList.count
         lastBuiltCount = words.count
     }
@@ -103,6 +110,7 @@ struct WordListView: View {
         let now = Date()
         let cal = Calendar.current
         cachedList[idx] = RowVM(word: word, chips: makeChips(for: word, now: now, cal: cal))
+        cachedWordsByID[word.persistentModelID] = word
     }
 
     /// 칩 계산 - 부모(rebuildList)에서 한 번만 수행
@@ -267,29 +275,29 @@ struct WordListView: View {
             .background(Theme.surface)
             .navigationBarHidden(true)
             .navigationDestination(for: PersistentIdentifier.self) { id in
-                if let word = words.first(where: { $0.persistentModelID == id }) {
+                if let word = cachedWordsByID[id] {
                     WordDetailView(word: word)
                 }
             }
-            .sheet(isPresented: $showAdd) {
+            .sheet(isPresented: $showAdd, onDismiss: {
+                fetchWords()
+                rebuildList()
+            }) {
                 WordEditView(mode: .add)
             }
             .onAppear {
-                // 첫 paint 후에만 rebuildList() 실행 — 시작 화면이 즉시 뜨도록.
+                // 첫 paint 후에만 fetch/rebuild 실행 — 시작 화면이 즉시 뜨도록.
                 if !didInitialBuild {
-                    // 다음 런루프로 미룸: 현재 paint 가 끝난 뒤 메인 큐에서 실행.
                     DispatchQueue.main.async {
+                        fetchWords()
                         rebuildList()
                         didInitialBuild = true
                     }
                 }
             }
-            // 첫 paint 전(!didInitialBuild)에는 words 를 읽지 않아 @Query fetch 가
-            // 첫 프레임을 막지 않도록 게이팅한다. didInitialBuild 가 true 가 된 뒤에만
-            // 실제 words.count 를 구독 → fetch 는 onAppear 의 다음 런루프(첫 paint 이후)에서 발생.
-            .onChange(of: didInitialBuild ? words.count : -1) { _, newValue in
-                // 단어 추가/삭제 시 즉시 재계산. 최초 빌드 직후의 중복 호출은 lastBuiltCount 로 차단.
-                guard didInitialBuild, newValue != lastBuiltCount else { return }
+            .onReceive(NotificationCenter.default.publisher(for: .vocabImported)) { _ in
+                guard didInitialBuild else { return }
+                fetchWords()
                 rebuildList()
             }
             .onChange(of: filter) {
@@ -454,6 +462,7 @@ struct WordListView: View {
 
         if filter == .favorite && !word.isFavorite {
             cachedList.removeAll { $0.word.persistentModelID == word.persistentModelID }
+            cachedWordsByID.removeValue(forKey: word.persistentModelID)
             cachedCount = cachedList.count
             return
         }
@@ -479,6 +488,7 @@ struct WordListView: View {
         context.delete(word)
         try? context.save()
         SaveScheduler.shared.cancel()
+        cachedWordsByID.removeValue(forKey: word.persistentModelID)
         rebuildList()
     }
 }

@@ -113,6 +113,7 @@ enum NaverSync {
 
     // MARK: - Private helpers
 
+    @MainActor
     private static func extractAndSaveCookies(from webView: WKWebView) async throws -> [HTTPCookie] {
         let dataStore = webView.configuration.websiteDataStore
         let cookies = await dataStore.httpCookieStore.allCookies()

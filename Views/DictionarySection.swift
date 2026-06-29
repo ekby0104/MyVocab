@@ -8,7 +8,7 @@ import SafariServices
 struct DictionarySection: View {
     let word: String
     @Environment(\.displayScale) private var displayScale
-    @State private var service = DictionaryService()
+    private let service = DictionaryService.shared
     @StateObject private var audioPlayer = AudioPlayerService.shared
 
     @State private var state: LoadState = .idle
@@ -320,15 +320,15 @@ struct DictionarySection: View {
 
     private func load(force: Bool) async {
         let targetWord = word
-        print("[DictionarySection] load 시작: '\(targetWord)', force=\(force), state=\(state), currentLoadedWord='\(currentLoadedWord)'")
+        debugLog("[DictionarySection] load 시작: '\(targetWord)', force=\(force), state=\(state), currentLoadedWord='\(currentLoadedWord)'")
 
         if state == .loading {
-            print("[DictionarySection] 이미 로딩 중, 스킵")
+            debugLog("[DictionarySection] 이미 로딩 중, 스킵")
             return
         }
 
         if !force, currentLoadedWord == targetWord, state != .idle {
-            print("[DictionarySection] 같은 단어 이미 처리됨(\(state)), 스킵")
+            debugLog("[DictionarySection] 같은 단어 이미 처리됨(\(state)), 스킵")
             return
         }
 
@@ -343,26 +343,32 @@ struct DictionarySection: View {
         do {
             let result = try await service.lookup(targetWord)
             guard targetWord == word else {
-                print("[DictionarySection] word 변경됨('\(targetWord)' → '\(word)'), 결과 무시")
+                debugLog("[DictionarySection] word 변경됨('\(targetWord)' → '\(word)'), 결과 무시")
                 return
             }
             info = result
             currentLoadedWord = targetWord
             state = .success
-            print("[DictionarySection] 성공: '\(targetWord)'")
+            debugLog("[DictionarySection] 성공: '\(targetWord)'")
         } catch let e as DictionaryService.DictError {
             guard targetWord == word else { return }
             errorMessage = e.errorDescription
             currentLoadedWord = targetWord
             state = .failed
-            print("[DictionarySection] 실패: '\(targetWord)' - \(e.errorDescription ?? "?")")
+            debugLog("[DictionarySection] 실패: '\(targetWord)' - \(e.errorDescription ?? "?")")
         } catch {
             guard targetWord == word else { return }
             errorMessage = error.localizedDescription
             currentLoadedWord = targetWord
             state = .failed
-            print("[DictionarySection] 실패: '\(targetWord)' - \(error.localizedDescription)")
+            debugLog("[DictionarySection] 실패: '\(targetWord)' - \(error.localizedDescription)")
         }
+    }
+
+    private func debugLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print(message())
+        #endif
     }
 }
 

@@ -6,6 +6,7 @@ import Foundation
 
 @MainActor
 final class TranslationService {
+    static let shared = TranslationService()
 
     enum TransError: LocalizedError {
         case notFound
@@ -26,12 +27,14 @@ final class TranslationService {
     // MARK: - 메모리 캐시
     private var cache: [String: String] = [:]
 
+    private init() {}
+
     func translate(_ word: String, from source: String = "en", to target: String = "ko") async throws -> String {
         let normalized = word.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !normalized.isEmpty else { throw TransError.notFound }
 
         if let cached = cache[normalized] {
-            print("[TranslationService] 캐시 히트: '\(normalized)'")
+            debugLog("[TranslationService] 캐시 히트: '\(normalized)'")
             return cached
         }
 
@@ -41,7 +44,7 @@ final class TranslationService {
 
         let urlString = "https://api.mymemory.translated.net/get?q=\(q)&langpair=\(source)|\(target)"
         guard let url = URL(string: urlString) else { throw TransError.invalidResponse }
-        print("[TranslationService] 요청 URL: \(urlString)")
+        debugLog("[TranslationService] 요청 URL: \(urlString)")
 
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -74,8 +77,14 @@ final class TranslationService {
         }
 
         cache[normalized] = text
-        print("[TranslationService] 성공 + 캐시 저장: '\(normalized)' → '\(text)'")
+        debugLog("[TranslationService] 성공 + 캐시 저장: '\(normalized)' → '\(text)'")
         return text
+    }
+
+    private func debugLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print(message())
+        #endif
     }
 }
 
